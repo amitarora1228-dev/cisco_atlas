@@ -1,0 +1,32 @@
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- OS / editor cruft ---
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# --- Customer data / DART bundles (NEVER commit) ---
+*.zip
+*.tar.gz
+*.tgz
+*.evtx
+*.pcap
+*.pcapng
+DARTLogs/
+uploads/
+instance/
+
+# --- Temp / scratch files ---
+.tmp_*.js
+*.tmp
+feedback.rtf
+
+# --- Stray assets ---
+kisspng-*.webp

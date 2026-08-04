@@ -2897,7 +2897,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
 
                         if (flowTimeframe) {
                             const timeCaption = document.createElement('span');
-                            timeCaption.className = 'px-1 text-[11px] font-mono text-slate-500';
+                            timeCaption.className = 'dh-flow-timeframe px-1 text-[11px] font-mono';
                             timeCaption.textContent = flowStart === flowEnd
                                 ? `\u23f1 ${flowStart}`
                                 : `\u23f1 ${flowStart} \u2192 ${flowEnd}`;

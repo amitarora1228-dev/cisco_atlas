@@ -181,6 +181,7 @@
         .dh-dest-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
         .dh-dest-title { font-size: 0.85rem; font-weight: 800; color: var(--text-main); }
         .dh-dest-sub { font-size: 0.76rem; color: var(--text-muted); }
+        .dh-flow-timeframe { color: var(--text-muted); font-weight: 600; }
         .dh-dest-body { margin-top: 0.75rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
         .dh-dest-donut { flex: none; }
         .dh-dest-bars { flex: 1 1 16rem; min-width: 14rem; display: flex; flex-direction: column; }

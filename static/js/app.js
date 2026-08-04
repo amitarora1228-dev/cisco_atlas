@@ -1521,6 +1521,11 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 statsHost.innerHTML = '';
                 statsHost.classList.add('hidden');
             }
+            const nextHost = document.getElementById('ztaSummaryNext');
+            if (nextHost) {
+                nextHost.innerHTML = '';
+                nextHost.classList.add('hidden');
+            }
             if (ztaSummaryPanel) {
                 ztaSummaryPanel.classList.add('hidden');
             }
@@ -1834,33 +1839,47 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         el.appendChild(box);
                     }
 
-                    // Evidence tucked behind a compact toggle (technical detail).
+                    // Evidence tucked behind a compact toggle, shown as clean
+                    // log-sample cards instead of a raw wrapped list.
                     if (groups.length) {
+                        const groupWord = groups.length === 1 ? 'sample' : 'samples';
                         const toggle = document.createElement('button');
                         toggle.type = 'button';
                         toggle.className = 'dh-evidence-toggle';
-                        const groupWord = groups.length === 1 ? 'group' : 'groups';
-                        toggle.textContent = `\u25b8 Evidence (${groups.length} ${groupWord})`;
+                        toggle.setAttribute('aria-expanded', 'false');
+                        const setToggleLabel = (open) => {
+                            toggle.textContent = `${open ? '\u25be Hide' : '\u25b8 Show'} log evidence (${groups.length} ${groupWord})`;
+                        };
+                        setToggleLabel(false);
                         const evidence = document.createElement('div');
-                        evidence.className = 'dh-evidence';
+                        evidence.className = 'dh-evlog';
                         evidence.style.display = 'none';
                         groups.forEach((group) => {
-                            const row = document.createElement('div');
-                            row.className = 'dh-evidence-row';
+                            const item = document.createElement('div');
+                            item.className = 'dh-evlog-item';
+                            const meta = document.createElement('div');
+                            meta.className = 'dh-evlog-meta';
                             const count = document.createElement('span');
-                            count.className = 'dh-evidence-count';
-                            count.textContent = `${num(group.count)}\u00d7`;
-                            const text = document.createElement('span');
-                            text.className = 'dh-evidence-text';
-                            text.textContent = String(group.label || '');
-                            row.appendChild(count);
-                            row.appendChild(text);
-                            evidence.appendChild(row);
+                            count.className = 'dh-evlog-count';
+                            const n = num(group.count);
+                            count.textContent = `${n}\u00d7`;
+                            const tag = document.createElement('span');
+                            tag.className = 'dh-evlog-tag';
+                            tag.textContent = n === 1 ? 'occurrence' : 'occurrences';
+                            meta.appendChild(count);
+                            meta.appendChild(tag);
+                            const code = document.createElement('code');
+                            code.className = 'dh-evlog-line';
+                            code.textContent = String(group.label || '');
+                            item.appendChild(meta);
+                            item.appendChild(code);
+                            evidence.appendChild(item);
                         });
                         toggle.addEventListener('click', () => {
                             const open = evidence.style.display !== 'none';
                             evidence.style.display = open ? 'none' : 'flex';
-                            toggle.textContent = `${open ? '\u25b8' : '\u25be'} Evidence (${groups.length} ${groupWord})`;
+                            toggle.setAttribute('aria-expanded', String(!open));
+                            setToggleLabel(!open);
                         });
                         el.appendChild(toggle);
                         el.appendChild(evidence);
@@ -1927,6 +1946,52 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     box.appendChild(details);
                 }
                 ztaSummaryTiles.appendChild(box);
+            }
+
+            // Global "what next" guidance so the reader knows how to go
+            // deeper after skimming the snapshot.
+            const nextHost = document.getElementById('ztaSummaryNext');
+            if (nextHost) {
+                nextHost.innerHTML = '';
+                const banner = document.createElement('div');
+                banner.className = 'dh-nextstep';
+                const icon = document.createElement('div');
+                icon.className = 'dh-nextstep-icon';
+                icon.textContent = '\u2192';
+                const body = document.createElement('div');
+                body.className = 'dh-nextstep-body';
+                const title = document.createElement('div');
+                title.className = 'dh-nextstep-title';
+                title.textContent = 'What next?';
+                const text = document.createElement('div');
+                text.className = 'dh-nextstep-text';
+                text.textContent = issues.length
+                    ? 'This snapshot is a quick read of the bundle. To investigate the flagged areas in depth \u2014 flows, enrollment, interception (SPA / SIA) and more \u2014 run the full ZTA analysis.'
+                    : 'Everything looks healthy at a glance. To confirm with a full pass \u2014 flows, enrollment, interception (SPA / SIA) and more \u2014 run the detailed ZTA analysis.';
+                const action = document.createElement('button');
+                action.type = 'button';
+                action.className = 'dh-nextstep-btn';
+                action.textContent = 'Run detailed ZTA analysis';
+                action.addEventListener('click', () => {
+                    const ztaRadio = document.getElementById('mod-zta');
+                    if (ztaRadio && !ztaRadio.checked) {
+                        ztaRadio.checked = true;
+                        ztaRadio.dataset.wasChecked = 'true';
+                    }
+                    try { toggleZtaOptions(); } catch (e) { /* no-op */ }
+                    try { updateResultPaneForOptionInteraction(false); } catch (e) { /* no-op */ }
+                    const opts = document.getElementById('ztaOptions');
+                    if (opts) {
+                        opts.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                });
+                body.appendChild(title);
+                body.appendChild(text);
+                body.appendChild(action);
+                banner.appendChild(icon);
+                banner.appendChild(body);
+                nextHost.appendChild(banner);
+                nextHost.classList.remove('hidden');
             }
 
             ztaSummaryPanel.classList.remove('hidden');
@@ -5686,7 +5751,12 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 duoOptions.classList.toggle('hidden', !isDuo);
             }
             if (mainInitiateButton) {
-                mainInitiateButton.classList.toggle('hidden', !!isZta);
+                // Show the main Initiate button only once a non-ZTA module is
+                // selected. It stays hidden with nothing selected (so it never
+                // appears before the user picks a module) and for ZTA, which
+                // uses its own contextual Initiate button.
+                const showMainInitiate = !!selected && !isZta;
+                mainInitiateButton.classList.toggle('hidden', !showMainInitiate);
             }
             if (!isZta) {
                 ztaAccessRadios.forEach((radio) => {

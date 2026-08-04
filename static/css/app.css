@@ -147,14 +147,52 @@
             color: var(--accent); background: none; border: none; cursor: pointer;
             padding: 0; display: inline-flex; align-items: center; gap: 0.3rem;
         }
-        .dh-evidence { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.3rem; max-height: 14rem; overflow-y: auto; }
-        .dh-evidence-row { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.8rem; color: var(--text-main); }
-        .dh-evidence-count {
-            flex: none; font-family: ui-monospace, monospace; font-weight: 800; font-size: 0.72rem;
-            padding: 0.05rem 0.4rem; border-radius: 0.3rem; background: var(--surface-soft);
-            color: var(--text-muted); border: 1px solid var(--border-main);
+        .dh-evlog { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; max-height: 22rem; overflow-y: auto; }
+        .dh-evlog-item {
+            border: 1px solid var(--border-main); border-left: 3px solid var(--accent);
+            border-radius: 0.5rem; background: var(--surface-soft); padding: 0.5rem 0.6rem;
+            display: flex; flex-direction: column; gap: 0.4rem;
         }
-        .dh-evidence-text { word-break: break-all; color: var(--text-muted); }
+        .dh-evlog-meta { display: flex; align-items: center; gap: 0.45rem; }
+        .dh-evlog-count {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 800; font-size: 0.72rem;
+            padding: 0.08rem 0.45rem; border-radius: 0.35rem; background: var(--accent); color: #fff;
+        }
+        .dh-evlog-tag {
+            font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em;
+            text-transform: uppercase; color: var(--text-muted);
+        }
+        .dh-evlog-line {
+            display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.76rem; line-height: 1.5; color: var(--text-main);
+            background: var(--surface-bg); border: 1px solid var(--border-main);
+            border-radius: 0.4rem; padding: 0.4rem 0.55rem; overflow-x: auto;
+            white-space: pre-wrap; word-break: break-word;
+        }
+
+        .dh-nextstep {
+            margin-top: 1rem; display: flex; gap: 0.75rem; align-items: flex-start;
+            border: 1px solid var(--accent); border-radius: 0.7rem;
+            background: var(--surface-soft); padding: 0.85rem 1rem;
+        }
+        .dh-nextstep-icon {
+            flex: none; width: 1.9rem; height: 1.9rem; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--accent); color: #fff; font-weight: 800; font-size: 1.05rem;
+        }
+        .dh-nextstep-body { display: flex; flex-direction: column; gap: 0.3rem; }
+        .dh-nextstep-title {
+            font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em;
+            text-transform: uppercase; color: var(--accent);
+        }
+        .dh-nextstep-text { font-size: 0.88rem; line-height: 1.5; color: var(--text-main); }
+        .dh-nextstep-btn {
+            align-self: flex-start; margin-top: 0.35rem; cursor: pointer;
+            border: none; border-radius: 0.5rem; padding: 0.5rem 0.95rem;
+            font-size: 0.82rem; font-weight: 700; letter-spacing: 0.02em;
+            background: var(--accent); color: #fff; transition: filter 0.15s ease;
+        }
+        .dh-nextstep-btn:hover { filter: brightness(1.08); }
 
         .dh-allclear {
             border: 1px solid var(--border-main); border-left-width: 5px; border-left-color: #10b981;

@@ -13,6 +13,14 @@
                 </div>
             </div>
 
+            <!-- Workspace navigation -->
+            <nav class="dh-rail-nav" aria-label="Workspace">
+                <div class="dh-rail-section">Workspace</div>
+                <button type="button" class="dh-rail-navitem is-active" data-view="analyze">Analyze bundle</button>
+                <button type="button" class="dh-rail-navitem" data-view="history">History</button>
+                <button type="button" class="dh-rail-navitem" data-view="reports">Reports</button>
+            </nav>
+
             <!-- Module navigation -->
             <div id="moduleSelectionWrap" class="dh-rail-modules">
                 <div class="dh-rail-section">Modules</div>
@@ -67,17 +75,21 @@
         <div class="dh-canvas">
             <header class="dh-topbar">
                 <div class="dh-topbar-titles">
-                    <div class="dh-topbar-title">DartHawk</div>
-                    <div class="dh-topbar-sub">Diagnostics &amp; Reporting Tool Analyzer</div>
+                    <div id="dhTopbarTitle" class="dh-topbar-title">DartHawk</div>
+                    <div id="dhTopbarSub" class="dh-topbar-sub">Diagnostics &amp; Reporting Tool Analyzer</div>
+                </div>
+                <div class="dh-topbar-actions">
+                    <button type="button" id="exportReportBtn" class="dh-topbar-btn-primary hidden">Export report</button>
                 </div>
             </header>
             <main class="dh-content space-y-6">
+        <div id="viewAnalyze" class="dh-view space-y-6">
         <form id="uploadForm" class="space-y-6">
             
             <!-- File Input -->
             <div class="space-y-2">
                 <label class="block text-sky-400 font-bold tracking-widest text-sm uppercase">Upload DART Zip File</label>
-                <div class="relative group">
+                <div id="dropZone" class="relative group dh-dropzone">
                     <input type="file" id="dartFile" accept=".zip" required 
                         class="block w-full text-sm text-sky-200
                         file:mr-4 file:py-3 file:px-6
@@ -86,6 +98,7 @@
                         file:bg-sky-600 hover:file:bg-sky-500
                         file:transition-all file:cursor-pointer
                         bg-black/20 rounded-lg border border-sky-500/30 w-full cursor-pointer p-1">
+                    <div class="dh-dropzone-hint">or drag &amp; drop a .zip DART bundle here</div>
                 </div>
             </div>
 
@@ -100,6 +113,7 @@
                     <div id="ztaSummaryHeadline" class="text-sm font-semibold text-sky-100/80"></div>
                 </div>
                 <div id="ztaSummaryVerdict" class="hidden mt-3 rounded-lg border p-3"></div>
+                <div id="ztaSummaryStats" class="hidden"></div>
                 <div id="ztaSummaryHint" class="mt-3 text-sm text-slate-400">Click a card for a plain-English explanation and grouped evidence.</div>
                 <div id="ztaSummaryTiles" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
             </div>
@@ -532,6 +546,24 @@
                 </div>
                 <pre id="resultContent" class="text-sm text-sky-200 font-mono whitespace-pre-wrap overflow-x-auto overflow-y-auto min-h-64 max-h-[36rem] resize-y"></pre>
             </div>
+        </div>
+        </div><!-- /viewAnalyze -->
+
+        <div id="viewHistory" class="dh-view hidden space-y-4">
+            <div class="flex items-center justify-between">
+                <div class="text-sky-400 font-bold tracking-widest text-base uppercase">Analysis History</div>
+                <button type="button" id="clearHistoryBtn" class="dh-topbar-btn-ghost hidden">Clear history</button>
+            </div>
+            <p class="text-sm text-slate-400">Bundles you analyzed in this browser. Stored locally on your machine only.</p>
+            <div id="historyList" class="space-y-3"></div>
+            <div id="historyEmpty" class="dh-empty">No analyses yet. Run an analysis to see it here.</div>
+        </div>
+
+        <div id="viewReports" class="dh-view hidden space-y-4">
+            <div class="text-sky-400 font-bold tracking-widest text-base uppercase">Saved Reports</div>
+            <p class="text-sm text-slate-400">Reports you exported. Click to download again or remove.</p>
+            <div id="reportsList" class="space-y-3"></div>
+            <div id="reportsEmpty" class="dh-empty">No exported reports yet. Run an analysis and choose "Export report".</div>
         </div>
 
         <div id="readmePanel" class="hidden mt-8 rounded-lg border border-sky-500/30 bg-black/30 p-5">

@@ -1516,6 +1516,11 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             if (ztaSummaryTiles) {
                 ztaSummaryTiles.innerHTML = '';
             }
+            const statsHost = document.getElementById('ztaSummaryStats');
+            if (statsHost) {
+                statsHost.innerHTML = '';
+                statsHost.classList.add('hidden');
+            }
             if (ztaSummaryPanel) {
                 ztaSummaryPanel.classList.add('hidden');
             }
@@ -1608,6 +1613,95 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 ztaSummaryHint.textContent = issues.length
                     ? 'Problems needing attention are shown first, with suggested next steps. Healthy checks are summarized below.'
                     : 'All ZTA health checks passed.';
+            }
+
+            // --- Summary tiles + severity donut (real data from the assessment) ---
+            const statsHost = document.getElementById('ztaSummaryStats');
+            if (statsHost) {
+                statsHost.innerHTML = '';
+                const healthScore = Math.max(0, Math.min(100, 100 - (criticalCount * 25) - (warningCount * 10)));
+                const flowsCard = assessment.find((c) => c.label === 'Flows');
+                let flowCount = 0;
+                let flowSub = '';
+                if (flowsCard) {
+                    const m = String(flowsCard.chip || '').match(/\d[\d,]*/);
+                    flowCount = m ? Number(m[0].replace(/,/g, '')) : 0;
+                    const groups = Array.isArray(flowsCard.groups) ? flowsCard.groups : [];
+                    flowSub = groups.length ? `${groups.length} destination${groups.length === 1 ? '' : 's'}` : (flowsCard.metric || '');
+                }
+                const scoreClass = healthScore >= 85 ? 'is-good' : (healthScore >= 60 ? 'is-warn' : 'is-bad');
+
+                const stats = document.createElement('div');
+                stats.className = 'dh-snap-stats';
+
+                const tiles = document.createElement('div');
+                tiles.className = 'dh-snap-tiles';
+                const mkTile = (label, value, sub, cls) => {
+                    const t = document.createElement('div');
+                    t.className = `dh-snap-tile${cls ? ' ' + cls : ''}`;
+                    const l = document.createElement('div'); l.className = 'dh-snap-tile-label'; l.textContent = label;
+                    const v = document.createElement('div'); v.className = 'dh-snap-tile-value'; v.textContent = value;
+                    t.appendChild(l); t.appendChild(v);
+                    if (sub) { const s = document.createElement('div'); s.className = 'dh-snap-tile-sub'; s.textContent = sub; t.appendChild(s); }
+                    return t;
+                };
+                tiles.appendChild(mkTile('Health score', String(healthScore), 'out of 100', scoreClass));
+                tiles.appendChild(mkTile('Needs attention', String(issues.length), issues.length ? 'warnings / critical' : 'none', issues.length ? (criticalCount ? 'is-bad' : 'is-warn') : 'is-good'));
+                tiles.appendChild(mkTile('Healthy checks', String(healthy.length), `of ${assessment.length} total`, 'is-good'));
+                tiles.appendChild(mkTile('Flows analyzed', String(flowCount), flowSub, ''));
+                stats.appendChild(tiles);
+
+                // Donut by severity status.
+                const segs = [
+                    { key: 'critical', color: '#ef4444', n: criticalCount, label: 'Critical' },
+                    { key: 'warning', color: '#f59e0b', n: warningCount, label: 'Warning' },
+                    { key: 'healthy', color: '#10b981', n: healthy.length, label: 'Healthy' },
+                ].filter((s) => s.n > 0);
+                const total = segs.reduce((acc, s) => acc + s.n, 0) || 1;
+                const donut = document.createElement('div');
+                donut.className = 'dh-snap-donut';
+                const NS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(NS, 'svg');
+                svg.setAttribute('viewBox', '0 0 42 42');
+                svg.setAttribute('width', '96'); svg.setAttribute('height', '96');
+                const r = 15.915; const cx = 21; const cy = 21;
+                const track = document.createElementNS(NS, 'circle');
+                track.setAttribute('cx', cx); track.setAttribute('cy', cy); track.setAttribute('r', r);
+                track.setAttribute('fill', 'transparent'); track.setAttribute('stroke', 'var(--border-main)'); track.setAttribute('stroke-width', '5');
+                svg.appendChild(track);
+                let offset = 25; // start at top
+                segs.forEach((s) => {
+                    const pct = (s.n / total) * 100;
+                    const c = document.createElementNS(NS, 'circle');
+                    c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+                    c.setAttribute('fill', 'transparent'); c.setAttribute('stroke', s.color); c.setAttribute('stroke-width', '5');
+                    c.setAttribute('stroke-dasharray', `${pct} ${100 - pct}`);
+                    c.setAttribute('stroke-dashoffset', String(offset));
+                    svg.appendChild(c);
+                    offset = (offset - pct + 100) % 100;
+                });
+                const center = document.createElementNS(NS, 'text');
+                center.setAttribute('x', cx); center.setAttribute('y', cy + 1);
+                center.setAttribute('text-anchor', 'middle'); center.setAttribute('dominant-baseline', 'middle');
+                center.setAttribute('font-size', '9'); center.setAttribute('font-weight', '800'); center.setAttribute('fill', 'var(--text-main)');
+                center.textContent = String(assessment.length);
+                svg.appendChild(center);
+                donut.appendChild(svg);
+                const legend = document.createElement('div');
+                legend.className = 'dh-snap-donut-legend';
+                (segs.length ? segs : [{ color: '#10b981', n: healthy.length, label: 'Healthy' }]).forEach((s) => {
+                    const row = document.createElement('div'); row.className = 'row';
+                    const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = s.color;
+                    const txt = document.createElement('span');
+                    const n = document.createElement('span'); n.className = 'n'; n.textContent = String(s.n);
+                    txt.appendChild(n); txt.appendChild(document.createTextNode(` ${s.label}`));
+                    row.appendChild(dot); row.appendChild(txt); legend.appendChild(row);
+                });
+                donut.appendChild(legend);
+                stats.appendChild(donut);
+
+                statsHost.appendChild(stats);
+                statsHost.classList.remove('hidden');
             }
 
             // Container becomes a vertical stack (not a grid).
@@ -1836,6 +1930,20 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             }
 
             ztaSummaryPanel.classList.remove('hidden');
+
+            try {
+                if (typeof window.dhRecordHistory === 'function') {
+                    const scoreForHist = Math.max(0, Math.min(100, 100 - (criticalCount * 25) - (warningCount * 10)));
+                    window.dhRecordHistory({
+                        verdictLevel: verdictLevel,
+                        criticalCount: criticalCount,
+                        warningCount: warningCount,
+                        healthyCount: healthy.length,
+                        total: assessment.length,
+                        healthScore: scoreForHist,
+                    });
+                }
+            } catch (e) { /* history is non-critical */ }
         }
 
         function resetBundleInsightPanel() {
@@ -6757,3 +6865,271 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         }
 
         applyChatOnlyUiMode();
+
+        // ---------------------------------------------------------------
+        // Modern shell: view switching, dropzone, export, history/reports
+        // ---------------------------------------------------------------
+        (function initDhWorkspace() {
+            const HISTORY_KEY = 'darthawk_history';
+            const REPORTS_KEY = 'darthawk_reports';
+            const MAX_HISTORY = 15;
+            const MAX_REPORTS = 20;
+            const MAX_TEXT = 150000;
+            const VERDICT_LABEL = { healthy: 'Healthy', degraded: 'Degraded', problem: 'Problem' };
+
+            const readStore = (key) => {
+                try { const v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v : []; }
+                catch (e) { return []; }
+            };
+            const writeStore = (key, arr) => {
+                try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) { /* quota / private mode */ }
+            };
+            const fmtTime = (ts) => {
+                try { return new Date(ts).toLocaleString(); } catch (e) { return ''; }
+            };
+            const currentModule = () => {
+                const r = document.querySelector('input[name="module"]:checked');
+                return r ? r.value : '';
+            };
+            const currentOrg = () => {
+                const el = document.getElementById('orgIdPreviewText');
+                const m = (el ? el.textContent : '').match(/\b\d{6,}\b/);
+                return m ? m[0] : '';
+            };
+            const currentFileName = () => {
+                const f = document.getElementById('dartFile');
+                return (f && f.files && f.files[0]) ? f.files[0].name : 'DART bundle';
+            };
+            const currentReportText = () => {
+                const el = document.getElementById('resultContent');
+                return el ? String(el.textContent || '') : '';
+            };
+            const downloadText = (name, text) => {
+                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = name;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            };
+
+            let lastAnalysis = null;
+
+            // Called by renderZtaSummary after each ZTA snapshot render.
+            window.dhRecordHistory = function (summary) {
+                const record = {
+                    id: 'a' + Date.now(),
+                    ts: Date.now(),
+                    module: currentModule() || 'ZTA',
+                    org: currentOrg(),
+                    file: currentFileName(),
+                    verdict: summary.verdictLevel || 'healthy',
+                    criticalCount: summary.criticalCount || 0,
+                    warningCount: summary.warningCount || 0,
+                    healthyCount: summary.healthyCount || 0,
+                    total: summary.total || 0,
+                    healthScore: typeof summary.healthScore === 'number' ? summary.healthScore : null,
+                };
+                lastAnalysis = record;
+                const hist = readStore(HISTORY_KEY);
+                // De-dupe: one entry per bundle (same file + org), keep newest.
+                const idx = hist.findIndex((h) => h.file === record.file && h.org === record.org);
+                if (idx >= 0) { hist.splice(idx, 1); }
+                hist.unshift(record);
+                writeStore(HISTORY_KEY, hist.slice(0, MAX_HISTORY));
+                updateExportVisibility();
+            };
+
+            function updateExportVisibility() {
+                const btn = document.getElementById('exportReportBtn');
+                if (!btn) { return; }
+                const analyzeActive = !document.getElementById('viewAnalyze').classList.contains('hidden');
+                btn.classList.toggle('hidden', !(analyzeActive && lastAnalysis));
+            }
+
+            // ---- View switching ----
+            const navItems = Array.from(document.querySelectorAll('.dh-rail-navitem'));
+            const views = {
+                analyze: document.getElementById('viewAnalyze'),
+                history: document.getElementById('viewHistory'),
+                reports: document.getElementById('viewReports'),
+            };
+            const TITLES = {
+                analyze: ['DartHawk', 'Diagnostics & Reporting Tool Analyzer'],
+                history: ['History', 'Previously analyzed DART bundles'],
+                reports: ['Reports', 'Exported analysis reports'],
+            };
+            function switchView(name) {
+                Object.keys(views).forEach((k) => {
+                    if (views[k]) { views[k].classList.toggle('hidden', k !== name); }
+                });
+                navItems.forEach((n) => n.classList.toggle('is-active', n.getAttribute('data-view') === name));
+                const t = TITLES[name] || TITLES.analyze;
+                const titleEl = document.getElementById('dhTopbarTitle');
+                const subEl = document.getElementById('dhTopbarSub');
+                if (titleEl) { titleEl.textContent = t[0]; }
+                if (subEl) { subEl.textContent = t[1]; }
+                if (name === 'history') { renderHistory(); }
+                if (name === 'reports') { renderReports(); }
+                updateExportVisibility();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            navItems.forEach((n) => n.addEventListener('click', () => switchView(n.getAttribute('data-view'))));
+
+            // ---- History rendering ----
+            function badge(verdict) {
+                const span = document.createElement('span');
+                span.className = `dh-record-badge is-${verdict}`;
+                span.textContent = VERDICT_LABEL[verdict] || 'Healthy';
+                return span;
+            }
+            function renderHistory() {
+                const list = document.getElementById('historyList');
+                const empty = document.getElementById('historyEmpty');
+                const clearBtn = document.getElementById('clearHistoryBtn');
+                if (!list) { return; }
+                const hist = readStore(HISTORY_KEY);
+                list.innerHTML = '';
+                if (empty) { empty.classList.toggle('hidden', hist.length > 0); }
+                if (clearBtn) { clearBtn.classList.toggle('hidden', hist.length === 0); }
+                hist.forEach((h) => {
+                    const row = document.createElement('div');
+                    row.className = 'dh-record';
+                    const main = document.createElement('div');
+                    main.className = 'dh-record-main';
+                    const title = document.createElement('div');
+                    title.className = 'dh-record-title';
+                    title.textContent = h.file || 'DART bundle';
+                    const meta = document.createElement('div');
+                    meta.className = 'dh-record-meta';
+                    const bits = [h.module || 'ZTA'];
+                    if (h.org) { bits.push('org ' + h.org); }
+                    if (typeof h.healthScore === 'number') { bits.push('score ' + h.healthScore); }
+                    bits.push(`${h.criticalCount} critical / ${h.warningCount} warning / ${h.healthyCount} healthy`);
+                    bits.push(fmtTime(h.ts));
+                    meta.textContent = bits.join('  \u00b7  ');
+                    main.appendChild(title); main.appendChild(meta);
+                    const actions = document.createElement('div');
+                    actions.className = 'dh-record-actions';
+                    const del = document.createElement('button');
+                    del.type = 'button'; del.className = 'dh-topbar-btn-ghost'; del.textContent = 'Remove';
+                    del.addEventListener('click', () => {
+                        const next = readStore(HISTORY_KEY).filter((x) => x.id !== h.id);
+                        writeStore(HISTORY_KEY, next);
+                        renderHistory();
+                    });
+                    actions.appendChild(del);
+                    row.appendChild(main); row.appendChild(badge(h.verdict)); row.appendChild(actions);
+                    list.appendChild(row);
+                });
+            }
+            const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+            if (clearHistoryBtn) {
+                clearHistoryBtn.addEventListener('click', () => { writeStore(HISTORY_KEY, []); renderHistory(); });
+            }
+
+            // ---- Reports rendering ----
+            function renderReports() {
+                const list = document.getElementById('reportsList');
+                const empty = document.getElementById('reportsEmpty');
+                if (!list) { return; }
+                const reports = readStore(REPORTS_KEY);
+                list.innerHTML = '';
+                if (empty) { empty.classList.toggle('hidden', reports.length > 0); }
+                reports.forEach((rep) => {
+                    const row = document.createElement('div');
+                    row.className = 'dh-record';
+                    const main = document.createElement('div');
+                    main.className = 'dh-record-main';
+                    const title = document.createElement('div');
+                    title.className = 'dh-record-title';
+                    title.textContent = rep.name || 'report.txt';
+                    const meta = document.createElement('div');
+                    meta.className = 'dh-record-meta';
+                    const bits = [rep.module || 'ZTA'];
+                    if (rep.org) { bits.push('org ' + rep.org); }
+                    bits.push(fmtTime(rep.ts));
+                    meta.textContent = bits.join('  \u00b7  ');
+                    main.appendChild(title); main.appendChild(meta);
+                    const actions = document.createElement('div');
+                    actions.className = 'dh-record-actions';
+                    const dl = document.createElement('button');
+                    dl.type = 'button'; dl.className = 'dh-topbar-btn-ghost'; dl.textContent = 'Download';
+                    dl.addEventListener('click', () => downloadText(rep.name, rep.text || ''));
+                    const del = document.createElement('button');
+                    del.type = 'button'; del.className = 'dh-topbar-btn-ghost'; del.textContent = 'Remove';
+                    del.addEventListener('click', () => {
+                        writeStore(REPORTS_KEY, readStore(REPORTS_KEY).filter((x) => x.id !== rep.id));
+                        renderReports();
+                    });
+                    actions.appendChild(dl); actions.appendChild(del);
+                    row.appendChild(main); row.appendChild(badge(rep.verdict)); row.appendChild(actions);
+                    list.appendChild(row);
+                });
+            }
+
+            // ---- Export ----
+            function buildReportText() {
+                const a = lastAnalysis || {};
+                const lines = [];
+                lines.push('DartHawk Analysis Report');
+                lines.push('========================');
+                lines.push('Generated: ' + new Date().toLocaleString());
+                lines.push('Module:    ' + (a.module || currentModule() || 'ZTA'));
+                if (a.org) { lines.push('Org ID:    ' + a.org); }
+                lines.push('Bundle:    ' + (a.file || currentFileName()));
+                if (a.verdict) {
+                    lines.push('Verdict:   ' + (VERDICT_LABEL[a.verdict] || a.verdict));
+                    lines.push('Summary:   ' + `${a.criticalCount || 0} critical, ${a.warningCount || 0} warning, ${a.healthyCount || 0} healthy`);
+                    if (typeof a.healthScore === 'number') { lines.push('Health:    ' + a.healthScore + '/100'); }
+                }
+                lines.push('');
+                lines.push('----- Analysis output -----');
+                lines.push(currentReportText() || '(no detailed output captured)');
+                return lines.join('\n');
+            }
+            const exportBtn = document.getElementById('exportReportBtn');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', () => {
+                    const a = lastAnalysis || {};
+                    const safeFile = String(a.file || 'bundle').replace(/\.zip$/i, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
+                    const name = `darthawk_${safeFile || 'report'}_${new Date().toISOString().slice(0, 10)}.txt`;
+                    const text = buildReportText();
+                    downloadText(name, text);
+                    const reports = readStore(REPORTS_KEY);
+                    reports.unshift({
+                        id: 'r' + Date.now(), ts: Date.now(), name: name,
+                        module: a.module || currentModule() || 'ZTA', org: a.org || currentOrg(),
+                        verdict: a.verdict || 'healthy', text: text.slice(0, MAX_TEXT),
+                    });
+                    writeStore(REPORTS_KEY, reports.slice(0, MAX_REPORTS));
+                });
+            }
+
+            // ---- Drag & drop upload ----
+            const dropZone = document.getElementById('dropZone');
+            const dartFile = document.getElementById('dartFile');
+            if (dropZone && dartFile) {
+                ['dragenter', 'dragover'].forEach((ev) => dropZone.addEventListener(ev, (e) => {
+                    e.preventDefault(); e.stopPropagation(); dropZone.classList.add('is-dragover');
+                }));
+                ['dragleave', 'dragend'].forEach((ev) => dropZone.addEventListener(ev, (e) => {
+                    e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('is-dragover');
+                }));
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('is-dragover');
+                    const files = e.dataTransfer && e.dataTransfer.files;
+                    if (files && files.length) {
+                        const f = files[0];
+                        if (!/\.zip$/i.test(f.name)) { return; }
+                        try {
+                            const dt = new DataTransfer();
+                            dt.items.add(f);
+                            dartFile.files = dt.files;
+                        } catch (err) { /* older browsers */ }
+                        dartFile.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+            }
+        })();
+

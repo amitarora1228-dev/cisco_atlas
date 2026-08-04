@@ -4654,6 +4654,73 @@ def group_evidence_lines(lines, limit=5):
     return [{"label": sig, "count": counter[sig]} for sig in order[:limit]]
 
 
+# Ordered cause buckets for server-connectivity events. The first matching
+# pattern wins, so more-specific causes are listed before the generic fallback.
+_CONNECTIVITY_CAUSE_RULES = [
+    (
+        "dns_doh",
+        "DNS / DoH resolution timed out",
+        "Secure Access DoH resolver did not answer (request_timeout / RequestTimedOut).",
+        re.compile(r"dnsflow|dohclient|\bdoh\b|resolver|request_?timeout|requesttimedout|dns\s+(?:resolution|resolve)", re.IGNORECASE),
+    ),
+    (
+        "headend_tunnel",
+        "Headend / tunnel unreachable",
+        "The HTTP/2 tunnel to the Secure Access headend could not carry data.",
+        re.compile(r"http2mux|\btunnel\b|ztnatransport|transportmanager|stream=|headend|h2\b", re.IGNORECASE),
+    ),
+    (
+        "network_captive",
+        "Network unreachable / captive portal",
+        "The underlying network blocked the reachability probe (ServerUnreachable / connecttest).",
+        re.compile(r"serverunreachable|captiveportal|connecttest|msftconnecttest|network\s+unreachable|host\s+unreachable|network\s+is\s+not\s+present|no\s+route", re.IGNORECASE),
+    ),
+    (
+        "tls_cert",
+        "TLS / certificate failure",
+        "The secure channel to the headend failed to negotiate.",
+        re.compile(r"tls\s+handshake|\bssl\b|certificate|handshake\s+failed|sec_e", re.IGNORECASE),
+    ),
+    (
+        "posture_dha",
+        "Device posture (DHA) not connected",
+        "The Device Health Agent IPC/posture channel was down.",
+        re.compile(r"\bdha\b|posture", re.IGNORECASE),
+    ),
+]
+
+
+def categorize_connectivity_causes(lines):
+    """Bucket server-connectivity event lines into human causes for a diagram.
+
+    Returns a list of ``{"key", "label", "hint", "count"}`` ordered by count so
+    the Health Snapshot can draw a cause->effect diagram instead of raw log rows.
+    """
+    counter = {}
+    hints = {}
+    labels = {}
+    for line in lines or []:
+        text = str(line or "")
+        matched_key = "other_reconnect"
+        for key, label, hint, pattern in _CONNECTIVITY_CAUSE_RULES:
+            if pattern.search(text):
+                matched_key = key
+                labels[key] = label
+                hints[key] = hint
+                break
+        else:
+            labels[matched_key] = "Other reconnect / reachability event"
+            hints[matched_key] = "Generic reconnect or reachability activity."
+        counter[matched_key] = counter.get(matched_key, 0) + 1
+
+    causes = [
+        {"key": key, "label": labels[key], "hint": hints[key], "count": count}
+        for key, count in counter.items()
+    ]
+    causes.sort(key=lambda item: item["count"], reverse=True)
+    return causes
+
+
 def build_zta_preview_signals(root_dir):
     """Lightweight, best-effort summary of key ZTA-log findings for the bundle preview.
 
@@ -4935,16 +5002,23 @@ def build_zta_preview_signals(root_dir):
     # Server connectivity.
     connectivity_count = len(connectivity_lines)
     if connectivity_count > 0:
+        connectivity_causes = categorize_connectivity_causes(connectivity_lines)
         assessment.append({
             "label": "Server Connectivity",
             "severity": "warning",
             "chip": plural(connectivity_count, "event"),
             "metric": "Headend reachability",
-            "summary": f"{plural(connectivity_count, 'reachability / reconnect event')} were logged, grouped below.",
+            "summary": f"{plural(connectivity_count, 'reachability / reconnect event')} were logged, grouped by cause below.",
             "meaning": "The agent logged reconnect or reachability activity to the ZTA headend / DoH resolver. High counts are usually transient retries rather than a hard outage.",
             "impact": "Occasional reconnects are normal; only a sustained failure would block private-app access and DNS steering.",
+            "diagram": {
+                "source": "Cisco Secure Client (ZTA)",
+                "target": "Secure Access headend / DoH resolver",
+                "causes": connectivity_causes,
+            },
             "suggestions": [
-                "Investigate only if the events cluster in time or line up with a user-reported outage - a steady trickle is normal.",
+                "Check the failing Flows above - repeatedly failing redirected flows can drive these server-connectivity events.",
+                "Verify the ZTA network requirements are met: allow *.ztna.sse.cisco.com, *.zpc.sse.cisco.com and *.tia.sse.cisco.com on 443 (TCP and UDP). See https://securitydocs.cisco.com/docs/csa/olh/118990.dita",
                 "Check whether the DoH resolver / headend was unreachable (DNS timeouts or captive-portal issues on the user's network).",
                 "Correlate the timestamps with network changes (Wi-Fi switch, VPN connect/disconnect, TND) to explain the reconnects.",
             ],

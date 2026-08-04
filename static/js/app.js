@@ -1531,6 +1531,27 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             }
 
             const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+            const appendTextWithLinks = (parent, text) => {
+                const urlPattern = /(https?:\/\/[^\s]+)/g;
+                let lastIndex = 0;
+                let match;
+                while ((match = urlPattern.exec(text)) !== null) {
+                    if (match.index > lastIndex) {
+                        parent.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                    }
+                    const anchor = document.createElement('a');
+                    anchor.href = match[0];
+                    anchor.target = '_blank';
+                    anchor.rel = 'noopener noreferrer';
+                    anchor.className = 'dh-suggest-link';
+                    anchor.textContent = match[0];
+                    parent.appendChild(anchor);
+                    lastIndex = match.index + match[0].length;
+                }
+                if (lastIndex < text.length) {
+                    parent.appendChild(document.createTextNode(text.slice(lastIndex)));
+                }
+            };
             const assessment = Array.isArray(signals.assessment) ? signals.assessment : [];
             if (!assessment.length) {
                 return;
@@ -1644,6 +1665,63 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     addBlock('What it means', card.meaning);
                     addBlock('Impact', card.impact);
 
+                    // Cause -> effect diagram (e.g. what drove connectivity events).
+                    const diagram = card.diagram && typeof card.diagram === 'object' ? card.diagram : null;
+                    const diagramCauses = diagram && Array.isArray(diagram.causes)
+                        ? diagram.causes.filter((c) => c && Number(c.count) > 0) : [];
+                    if (diagramCauses.length) {
+                        const block = document.createElement('div');
+                        block.className = 'dh-issue-block';
+                        const label = document.createElement('div');
+                        label.className = 'dh-issue-block-label';
+                        label.textContent = 'What caused it';
+                        block.appendChild(label);
+
+                        const dia = document.createElement('div');
+                        dia.className = 'dh-diagram';
+
+                        const source = document.createElement('div');
+                        source.className = 'dh-diagram-node is-source';
+                        source.textContent = diagram.source || 'Client';
+                        dia.appendChild(source);
+
+                        const arrowIn = document.createElement('div');
+                        arrowIn.className = 'dh-diagram-arrow';
+                        arrowIn.textContent = '\u2192';
+                        dia.appendChild(arrowIn);
+
+                        const causesCol = document.createElement('div');
+                        causesCol.className = 'dh-diagram-causes';
+                        diagramCauses.forEach((c) => {
+                            const cause = document.createElement('div');
+                            cause.className = 'dh-diagram-cause';
+                            const count = document.createElement('span');
+                            count.className = 'dh-diagram-cause-count';
+                            count.textContent = `${num(c.count)}\u00d7`;
+                            const txt = document.createElement('span');
+                            txt.className = 'dh-diagram-cause-text';
+                            txt.textContent = String(c.label || '');
+                            if (c.hint) { cause.title = String(c.hint); }
+                            cause.appendChild(count);
+                            cause.appendChild(txt);
+                            causesCol.appendChild(cause);
+                        });
+                        dia.appendChild(causesCol);
+
+                        const arrowOut = document.createElement('div');
+                        arrowOut.className = 'dh-diagram-arrow';
+                        arrowOut.textContent = '\u2192';
+                        dia.appendChild(arrowOut);
+
+                        const target = document.createElement('div');
+                        target.className = 'dh-diagram-node is-target';
+                        target.textContent = diagram.target || 'Server';
+                        dia.appendChild(target);
+
+                        block.appendChild(dia);
+                        el.appendChild(block);
+                    }
+
                     // Suggested next steps (always visible on issues).
                     if (suggestions.length) {
                         const box = document.createElement('div');
@@ -1655,7 +1733,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         const list = document.createElement('ul');
                         suggestions.forEach((item) => {
                             const li = document.createElement('li');
-                            li.textContent = String(item);
+                            appendTextWithLinks(li, String(item));
                             list.appendChild(li);
                         });
                         box.appendChild(list);

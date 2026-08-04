@@ -764,6 +764,20 @@
             background-color: var(--surface-card) !important;
         }
 
+        /* The global `[class*="text-sky"]` recolor washes sky text to a light
+           tone in darker theme. On light-tinted badge/chip backgrounds (which
+           are NOT darkened above) that produces light-on-light text. Restore a
+           dark, readable sky tone wherever sky text sits on a light chip fill. */
+        .theme-darker [class~="bg-sky-50"][class*="text-sky"],
+        .theme-darker [class~="bg-sky-100"][class*="text-sky"],
+        .theme-darker [class~="bg-slate-50"][class*="text-sky"],
+        .theme-darker [class~="bg-slate-100"][class*="text-sky"],
+        .theme-darker [class~="bg-emerald-50"][class*="text-sky"],
+        .theme-darker [class~="bg-emerald-100"][class*="text-sky"],
+        .theme-darker [class~="bg-white"][class*="text-sky"] {
+            color: #0c4a6e !important;
+        }
+
         .theme-darker #resultContent {
             background: #020b18 !important;
             color: #dbeafe !important;

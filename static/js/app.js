@@ -1541,13 +1541,23 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             // Fallback: humanize the Class::method() into a readable phrase so
             // distinct log lines get distinct, non-cryptic labels.
             const cleaned = s
-                .replace(/^csc_zta_agent\[[^\]]*\]\s*[A-Za-z]\/\s*/i, '')
+                .replace(/^.*?\bcsc_zta_agent\b(?:\[[^\]]*\])?\s*:?\s*/i, '')
+                .replace(/^\[[^\]]*\]\s*/i, '')
+                .replace(/^[A-Za-z]\/\s*/, '')
+                .replace(/^[<>-]+\s*/, '')
+                .replace(/\b[\w./-]+\.(?:cpp|cc|cxx|c|hpp|h|py|go|rs|js|mm):\d+\s*/i, '')
+                .replace(/<hex>|<ip>|<id>/g, '')
                 .replace(/\b[0-9a-fA-F]{6,}\b/g, '')
+                .replace(/\s*[:=]\s*N\b/g, '')
+                .replace(/\s+N\b\s*$/i, '')
                 .replace(/\s+/g, ' ')
+                .replace(/[\s:=,-]+$/, '')
                 .trim();
-            const method = cleaned.match(/([A-Za-z0-9_]+)::([A-Za-z0-9_]+)\s*\(\)/);
+            const method = cleaned.match(/([A-Za-z0-9_]+)::([A-Za-z0-9_]+)\s*\(\)/)
+                || cleaned.match(/\b([A-Za-z0-9_]+)\s*\(\)/);
             if (method) {
-                const words = method[2]
+                const name = method[2] || method[1];
+                const words = name
                     .replace(/_/g, ' ')
                     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
                     .toLowerCase()
@@ -1556,7 +1566,8 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 return { icon: '\u2139\uFE0F', text: phrase };
             }
             const short = cleaned.length > 90 ? cleaned.slice(0, 90).trim() + '\u2026' : cleaned;
-            return { icon: '\u2139\uFE0F', text: short || s };
+            const label = short ? short.charAt(0).toUpperCase() + short.slice(1) : 'Agent activity';
+            return { icon: '\u2139\uFE0F', text: label };
         }
 
         function resetZtaSummary() {

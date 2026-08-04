@@ -4625,6 +4625,13 @@ def _normalize_evidence_signature(line):
     """
     text = " ".join(str(line or "").split())
     text = re.sub(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*", "", text)
+    # Strip macOS unified-log columns + the csc_zta_agent process / subsystem /
+    # log-level boilerplate so the signature keeps only the meaningful message
+    # (otherwise ~90 chars of "+... Default ... csc_zta_agent: [..] T/" pushes
+    # the real text past the truncation limit and every line looks identical).
+    text = re.sub(r"^.*?\bcsc_zta_agent\b(?:\[[^\]]*\])?\s*:\s*", "", text)
+    text = re.sub(r"^\[[^\]]*\]\s*", "", text)
+    text = re.sub(r"^[A-Za-z]/\s*", "", text)
     text = re.sub(r"\b[\w./-]+\.(?:cpp|cc|cxx|c|hpp|h|py|go|rs|js|mm):\d+\b", "", text)
     text = re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", "<ip>", text)
     text = re.sub(r"\b0x[0-9a-fA-F]+\b", "<hex>", text)

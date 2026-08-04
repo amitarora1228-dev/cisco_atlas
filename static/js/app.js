@@ -2614,6 +2614,35 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     .trim();
             };
 
+            // Derive a flow's own time frame from the timestamps embedded in its
+            // captured trace logs (download_text header lines look like
+            // "<path>:L123 [2026-06-01 14:37:53.809459]"). Returns {start, end}
+            // or null when no timestamps were captured.
+            const extractFlowTimeframe = (downloadText) => {
+                const text = String(downloadText || '');
+                const stampPattern = /:L\d+\s+\[([^\]]+)\]/g;
+                const stamps = [];
+                let match;
+                while ((match = stampPattern.exec(text)) !== null) {
+                    const value = String(match[1] || '').trim();
+                    if (value && value.toLowerCase() !== 'unknown') {
+                        stamps.push(value);
+                    }
+                }
+                if (!stamps.length) {
+                    return null;
+                }
+                const parsed = stamps
+                    .map((value) => ({ value, ms: Date.parse(value.replace(' ', 'T')) }))
+                    .filter((item) => !Number.isNaN(item.ms));
+                if (parsed.length) {
+                    parsed.sort((left, right) => left.ms - right.ms);
+                    return { start: parsed[0].value, end: parsed[parsed.length - 1].value };
+                }
+                const sorted = stamps.slice().sort();
+                return { start: sorted[0], end: sorted[sorted.length - 1] };
+            };
+
             const categories = Array.isArray(summary && summary.categories)
                 ? summary.categories
                 : [];
@@ -2826,9 +2855,16 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     groupWrap.appendChild(title);
 
                     const btnRow = document.createElement('div');
-                    btnRow.className = 'flex flex-wrap gap-2';
+                    btnRow.className = 'flex flex-wrap items-start gap-2';
 
                     group.flows.forEach((flow) => {
+                        const flowTimeframe = extractFlowTimeframe(flow.category && flow.category.download_text);
+                        const flowStart = flowTimeframe ? flowTimeframe.start : timeframeStart;
+                        const flowEnd = flowTimeframe ? flowTimeframe.end : timeframeEnd;
+
+                        const flowWrap = document.createElement('div');
+                        flowWrap.className = 'flex flex-col gap-0.5';
+
                         const flowButton = document.createElement('button');
                         flowButton.type = 'button';
                         flowButton.className = flow.hasError
@@ -2847,8 +2883,8 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                                 srcPort: flow.srcPort,
                                 process: '',
                                 ruleType: '',
-                                firstTime: timeframeStart,
-                                lastTime: timeframeEnd,
+                                firstTime: flowStart,
+                                lastTime: flowEnd,
                             };
                             const destinationRow = { destination: group.destination, realDestinationIp: '' };
                             const model = flowUtils.buildFlowSequenceModel(session, destinationRow, traceLines);
@@ -2857,7 +2893,18 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                                 'Visual Flow Analyzer \u00b7 srcPort ' + flow.srcPort + ' \u00b7 ' + group.destination
                             );
                         });
-                        btnRow.appendChild(flowButton);
+                        flowWrap.appendChild(flowButton);
+
+                        if (flowTimeframe) {
+                            const timeCaption = document.createElement('span');
+                            timeCaption.className = 'px-1 text-[11px] font-mono text-slate-500';
+                            timeCaption.textContent = flowStart === flowEnd
+                                ? `\u23f1 ${flowStart}`
+                                : `\u23f1 ${flowStart} \u2192 ${flowEnd}`;
+                            flowWrap.appendChild(timeCaption);
+                        }
+
+                        btnRow.appendChild(flowWrap);
                     });
 
                     const safeName = flowUtils && typeof flowUtils.sanitizeFilenamePart === 'function'

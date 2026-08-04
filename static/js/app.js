@@ -1922,24 +1922,42 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         const list = document.createElement('div');
                         list.className = 'dh-evlist';
                         list.style.display = 'none';
-                        groups.forEach((group) => {
+                        const sortedGroups = groups.slice().sort((a, b) => num(b.count) - num(a.count));
+                        const maxCount = Math.max(1, ...sortedGroups.map((g) => num(g.count)));
+                        const totalCount = sortedGroups.reduce((sum, g) => sum + num(g.count), 0);
+                        sortedGroups.forEach((group) => {
                             const desc = describeEvidenceLine(group.label);
+                            const n = num(group.count);
                             const row = document.createElement('div');
                             row.className = 'dh-evrow';
+
+                            const main = document.createElement('div');
+                            main.className = 'dh-evrow-main';
                             const icon = document.createElement('span');
                             icon.className = 'dh-evrow-icon';
                             icon.textContent = desc.icon;
                             const text = document.createElement('div');
                             text.className = 'dh-evrow-text';
                             text.textContent = desc.text;
-                            const n = num(group.count);
                             const count = document.createElement('span');
                             count.className = 'dh-evrow-count';
                             count.textContent = `${n}\u00d7`;
                             count.title = `${n} ${n === 1 ? 'occurrence' : 'occurrences'}`;
-                            row.appendChild(icon);
-                            row.appendChild(text);
-                            row.appendChild(count);
+                            main.appendChild(icon);
+                            main.appendChild(text);
+                            main.appendChild(count);
+
+                            const meter = document.createElement('div');
+                            meter.className = 'dh-evrow-meter';
+                            const fill = document.createElement('div');
+                            fill.className = 'dh-evrow-meter-fill';
+                            fill.style.width = `${Math.max(4, Math.round((n / maxCount) * 100))}%`;
+                            const pct = totalCount ? Math.round((n / totalCount) * 100) : 0;
+                            meter.title = `${n} of ${totalCount} events (${pct}%)`;
+                            meter.appendChild(fill);
+
+                            row.appendChild(main);
+                            row.appendChild(meter);
                             list.appendChild(row);
                         });
                         toggle.addEventListener('click', () => {

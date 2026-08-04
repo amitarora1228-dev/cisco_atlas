@@ -6415,26 +6415,31 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         // is required. SPA runs all four checks; SIA runs the two it supports.
         async function runZtaHealthCheckDetailed(file, moduleValue, modeValue) {
             const isSia = String(modeValue || '').toUpperCase() === 'SIA';
+            // Each sub-check renders into its own dedicated visual summary card
+            // (same cards the standalone buttons produce). summaryKey = the field
+            // on the /analyze response, render = the card renderer for that check.
             const subChecks = isSia
                 ? [
-                    { value: 'Check Trusted Network Detection', title: 'Trusted Network Detection' },
-                    { value: 'Check User Pause Config', title: 'User Pause Config' },
+                    { value: 'Check Trusted Network Detection', title: 'Trusted Network Detection', summaryKey: 'tnd_summary', render: renderTndSummary },
+                    { value: 'Check User Pause Config', title: 'User Pause Config', summaryKey: 'user_pause_summary', render: renderUserPauseSummary },
                 ]
                 : [
-                    { value: 'Check Server Connectivity Errors', title: 'Server Connectivity Errors' },
-                    { value: 'Check Configuration Sync', title: 'Configuration Sync' },
-                    { value: 'Check Trusted Network Detection', title: 'Trusted Network Detection' },
-                    { value: 'Check User Pause Config', title: 'User Pause Config' },
+                    { value: 'Check Server Connectivity Errors', title: 'Server Connectivity Errors', summaryKey: 'server_connectivity_summary', render: renderServerConnectivitySummary },
+                    { value: 'Check Configuration Sync', title: 'Configuration Sync', summaryKey: 'config_sync_summary', render: renderConfigSyncSummary },
+                    { value: 'Check Trusted Network Detection', title: 'Trusted Network Detection', summaryKey: 'tnd_summary', render: renderTndSummary },
+                    { value: 'Check User Pause Config', title: 'User Pause Config', summaryKey: 'user_pause_summary', render: renderUserPauseSummary },
                 ];
 
             latestSpaCheckOption = 'ZTA Health Check Detailed';
             resultArea.classList.add('hidden');
-            setResultOutputPanelVisibility(true);
+            setResultOutputPanelVisibility(false);
             setCopyResultButtonState(false);
             setResultSearchState(false);
             setResultDownloadLinkState(false);
             setEnrollmentResultDownloadLinkState(false);
             resetServerConnectivitySummary();
+            resetConfigSyncSummary();
+            resetEventViewerSummary();
             resetTndSummary();
             resetUserPauseSummary();
             resetAiInsightCard();
@@ -6442,12 +6447,10 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
 
             btnLoader.classList.remove('hidden');
 
-            const NL = String.fromCharCode(10);
-            const rule = '='.repeat(60);
-            const sub = '\u2500'.repeat(46);
-            const sections = [];
             let moduleLabel = moduleValue;
             let failures = 0;
+            let rendered = 0;
+            const errorMessages = [];
 
             for (let i = 0; i < subChecks.length; i += 1) {
                 const check = subChecks[i];
@@ -6466,7 +6469,6 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 formData.append('show_full_cached_config', '0');
                 formData.append('cached_config_search_term', '');
 
-                let body = '';
                 try {
                     const response = await fetch('/analyze', { method: 'POST', body: formData });
                     const data = await response.json();
@@ -6474,47 +6476,34 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         if (data && data.module) {
                             moduleLabel = data.module;
                         }
-                        body = String((data && data.details) || '').trim() || '(No output returned for this check.)';
+                        const summary = data && data[check.summaryKey];
+                        if (summary) {
+                            check.render(summary);
+                            rendered += 1;
+                        } else {
+                            errorMessages.push(`${check.title}: no results found in this bundle.`);
+                        }
                     } else {
                         failures += 1;
-                        body = `[ERROR] ${(data && data.error) || ('Request failed with status ' + response.status)}`;
+                        errorMessages.push(`${check.title}: ${(data && data.error) || ('request failed with status ' + response.status)}`);
                     }
                 } catch (err) {
                     failures += 1;
-                    body = `[ERROR] ${err.toString()}`;
+                    errorMessages.push(`${check.title}: ${err.toString()}`);
                 }
-
-                sections.push([
-                    sub,
-                    `\u25B6 ${check.title}`,
-                    sub,
-                    body,
-                ].join(NL));
             }
 
-            const header = [
-                rule,
-                '  ZTA HEALTH CHECK \u2014 DETAILED',
-                rule,
-                '',
-                `Access mode: ${isSia ? 'SIA' : 'SPA'}`,
-                `Checks run (${subChecks.length}): ${subChecks.map((c) => c.title).join(', ')}`,
-                failures
-                    ? `\u26A0 ${failures} check(s) reported an error \u2014 see the sections below.`
-                    : 'All checks completed.',
-                '',
-            ].join(NL);
-
-            const combined = header + sections.join(NL + NL + NL);
             resultTitle.textContent = `[ ${moduleLabel} ] ZTA Health Check Detailed`;
-            renderResultText(combined, true);
-            setResultDownloadLinkState(true, 'zta_health_check_detailed.log', combined, false);
             resultArea.classList.remove('hidden');
-            setCopyResultButtonState(String(resultContent.textContent || '').trim().length > 0);
-            setAnalysisIndicatorState(
-                failures ? 'error' : 'success',
-                failures ? 'Completed with errors. Review the report.' : 'Analysis completed.'
-            );
+
+            if (errorMessages.length) {
+                setAnalysisIndicatorState(
+                    failures ? 'error' : 'success',
+                    `${rendered} of ${subChecks.length} check(s) rendered. ${errorMessages.join(' ')}`
+                );
+            } else {
+                setAnalysisIndicatorState('success', 'Analysis completed.');
+            }
             btnText.textContent = 'Initiate Analysis';
             btnLoader.classList.add('hidden');
         }

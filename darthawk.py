@@ -5026,9 +5026,9 @@ def build_zta_preview_signals(root_dir):
             "meaning": "The agent may be running stale or partial policy because it could not refresh its configuration from the cloud.",
             "impact": "Access decisions could be based on outdated policy until sync recovers.",
             "suggestions": [
-                "Verify the agent can reach the cloud config service - a proxy or firewall may be blocking policy refresh.",
-                "Check whether the errors cluster around one time or keep repeating (a one-off may have already recovered).",
-                "Confirm the enrolled org / policy is still valid and was not deleted or re-provisioned.",
+                "Verify the ZTA network requirements are met: allow *.ztna.sse.cisco.com, *.zpc.sse.cisco.com and *.tia.sse.cisco.com on 443 (TCP and UDP). See https://securitydocs.cisco.com/docs/csa/olh/118990.dita",
+                "If it's a new setup, make sure private resources are defined.",
+                "Check https://www.cisco.com/c/en/us/support/security/secure-access/products-tech-notes-list.html for any configuration sync errors. If you are unable to find a match, the Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
             ],
             "groups": group_evidence_lines(config_sync_lines),
         })

@@ -4951,14 +4951,14 @@ def build_zta_preview_signals(root_dir):
         cert_enroll_suggestions = [
             {"heading": "Certificate-based enrollments"},
             "Follow this guide: https://securitydocs.cisco.com/docs/csa/olh/121612.dita and https://www.cisco.com/c/en/us/support/docs/security/secure-access/225387-configure-secure-access-ztna-auto.html",
-            "Check and make sure Duo Desktop is installed and all Duo services are running.",
+            "Check and make sure Duo Desktop is installed and all Duo services are running. To collect Duo Desktop logs, see Duo Detailed Diagnostics: https://help.duo.com/s/article/5343?language=en_US and the Duo Support tool: https://help.duo.com/s/article/7686?language=en_US",
             "Try the latest Cisco Secure Client version if the current version is old.",
             "Collect a DART bundle with detailed ZTA tracing and upload it to the case. The Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
         ]
         saml_enroll_suggestions = [
             {"heading": "SAML-based enrollments"},
             "Follow this guide: https://securitydocs.cisco.com/docs/csa/olh/121613.dita",
-            "Check and make sure Duo Desktop is installed and all Duo services are running.",
+            "Check and make sure Duo Desktop is installed and all Duo services are running. To collect Duo Desktop logs, see Duo Detailed Diagnostics: https://help.duo.com/s/article/5343?language=en_US and the Duo Support tool: https://help.duo.com/s/article/7686?language=en_US",
             "Try the latest Cisco Secure Client version if the current version is old.",
             "Collect a DART bundle with detailed ZTA tracing. The Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
         ]

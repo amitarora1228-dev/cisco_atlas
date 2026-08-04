@@ -5812,6 +5812,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     && selectedSpaCheck.value !== 'Flow Analysis'
                     && selectedSpaCheck.value !== 'Check Trusted Network Detection'
                     && selectedSpaCheck.value !== 'Check User Pause Config'
+                    && selectedSpaCheck.value !== 'ZTA Health Check Detailed'
                 ) {
                     selectedSpaCheck.checked = false;
                 }
@@ -6406,6 +6407,118 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
 
         dartFile.addEventListener('change', inspectSelectedBundle);
 
+        // "ZTA Health Check Detailed" clubs the individual functional / config
+        // checks into a single click: it fires each underlying check in sequence
+        // and stitches their individual reports into one stacked, detailed output.
+        // The synthetic "ZTA Health Check Detailed" value is never sent to the
+        // backend — only the concrete per-check values are — so no backend change
+        // is required. SPA runs all four checks; SIA runs the two it supports.
+        async function runZtaHealthCheckDetailed(file, moduleValue, modeValue) {
+            const isSia = String(modeValue || '').toUpperCase() === 'SIA';
+            const subChecks = isSia
+                ? [
+                    { value: 'Check Trusted Network Detection', title: 'Trusted Network Detection' },
+                    { value: 'Check User Pause Config', title: 'User Pause Config' },
+                ]
+                : [
+                    { value: 'Check Server Connectivity Errors', title: 'Server Connectivity Errors' },
+                    { value: 'Check Configuration Sync', title: 'Configuration Sync' },
+                    { value: 'Check Trusted Network Detection', title: 'Trusted Network Detection' },
+                    { value: 'Check User Pause Config', title: 'User Pause Config' },
+                ];
+
+            latestSpaCheckOption = 'ZTA Health Check Detailed';
+            resultArea.classList.add('hidden');
+            setResultOutputPanelVisibility(true);
+            setCopyResultButtonState(false);
+            setResultSearchState(false);
+            setResultDownloadLinkState(false);
+            setEnrollmentResultDownloadLinkState(false);
+            resetServerConnectivitySummary();
+            resetTndSummary();
+            resetUserPauseSummary();
+            resetAiInsightCard();
+            resetAgentChatCard();
+
+            btnLoader.classList.remove('hidden');
+
+            const NL = String.fromCharCode(10);
+            const rule = '='.repeat(60);
+            const sub = '\u2500'.repeat(46);
+            const sections = [];
+            let moduleLabel = moduleValue;
+            let failures = 0;
+
+            for (let i = 0; i < subChecks.length; i += 1) {
+                const check = subChecks[i];
+                const stageMsg = `Running ${check.title} (${i + 1}/${subChecks.length})...`;
+                btnText.textContent = stageMsg;
+                setAnalysisIndicatorState('processing', stageMsg);
+
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('module', moduleValue);
+                formData.append('enable_ai_insight', '0');
+                appendClientTimezoneOffset(formData);
+                formData.append('zta_access_mode', isSia ? 'SIA' : 'SPA');
+                formData.append('spa_check_option', check.value);
+                formData.append('spa_target_value', '');
+                formData.append('show_full_cached_config', '0');
+                formData.append('cached_config_search_term', '');
+
+                let body = '';
+                try {
+                    const response = await fetch('/analyze', { method: 'POST', body: formData });
+                    const data = await response.json();
+                    if (response.ok) {
+                        if (data && data.module) {
+                            moduleLabel = data.module;
+                        }
+                        body = String((data && data.details) || '').trim() || '(No output returned for this check.)';
+                    } else {
+                        failures += 1;
+                        body = `[ERROR] ${(data && data.error) || ('Request failed with status ' + response.status)}`;
+                    }
+                } catch (err) {
+                    failures += 1;
+                    body = `[ERROR] ${err.toString()}`;
+                }
+
+                sections.push([
+                    sub,
+                    `\u25B6 ${check.title}`,
+                    sub,
+                    body,
+                ].join(NL));
+            }
+
+            const header = [
+                rule,
+                '  ZTA HEALTH CHECK \u2014 DETAILED',
+                rule,
+                '',
+                `Access mode: ${isSia ? 'SIA' : 'SPA'}`,
+                `Checks run (${subChecks.length}): ${subChecks.map((c) => c.title).join(', ')}`,
+                failures
+                    ? `\u26A0 ${failures} check(s) reported an error \u2014 see the sections below.`
+                    : 'All checks completed.',
+                '',
+            ].join(NL);
+
+            const combined = header + sections.join(NL + NL + NL);
+            resultTitle.textContent = `[ ${moduleLabel} ] ZTA Health Check Detailed`;
+            renderResultText(combined, true);
+            setResultDownloadLinkState(true, 'zta_health_check_detailed.log', combined, false);
+            resultArea.classList.remove('hidden');
+            setCopyResultButtonState(String(resultContent.textContent || '').trim().length > 0);
+            setAnalysisIndicatorState(
+                failures ? 'error' : 'success',
+                failures ? 'Completed with errors. Review the report.' : 'Analysis completed.'
+            );
+            btnText.textContent = 'Initiate Analysis';
+            btnLoader.classList.add('hidden');
+        }
+
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -6423,6 +6536,23 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
 
             const selectedZtaMode = document.querySelector('input[name="zta_access_mode"]:checked');
             const selectedSpaCheck = document.querySelector('input[name="spa_check_option"]:checked');
+
+            // "ZTA Health Check Detailed" clubs several functional/config checks
+            // into one click. Intercept before the normal single-check flow and
+            // orchestrate the underlying checks sequentially.
+            if (
+                moduleInput.value === 'ZTA'
+                && selectedSpaCheck
+                && selectedSpaCheck.id === 'spa-check-health-detailed'
+            ) {
+                if (!selectedZtaMode) {
+                    alert('Please select SPA or SIA for ZTA.');
+                    return;
+                }
+                const healthMode = selectedZtaMode.value === 'SIA' ? 'SIA' : 'SPA';
+                await runZtaHealthCheckDetailed(fileInput.files[0], moduleInput.value, healthMode);
+                return;
+            }
 
             // Flow Analysis: resolve the unified option into a concrete flow type
             // (SPA, SIA, or SRV) based on the entered target and selected access mode.

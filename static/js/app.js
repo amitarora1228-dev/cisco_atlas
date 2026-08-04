@@ -1505,6 +1505,47 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             node.textContent = text || fallback;
         }
 
+        // Translate a raw agent log line into a plain-English description so
+        // the snapshot stays readable; the raw line is still available on demand.
+        const EVIDENCE_DESCRIPTORS = [
+            { re: /closeStatus\s*=\s*RequestTimedOut/i, icon: '\u23F1\uFE0F', text: 'Connection closed after the request timed out' },
+            { re: /DnsFlowHandler::handleRequestTimeout/i, icon: '\u23F1\uFE0F', text: 'DNS request timed out' },
+            { re: /DnsFlowHandler::handleClose/i, icon: '\u23F1\uFE0F', text: 'DNS flow closed on a request timeout' },
+            { re: /OnNetworkChange/i, icon: '\uD83D\uDD04', text: 'Network change detected (Wi-Fi / adapter change)' },
+            { re: /debounce timer|handleDebounceTimerExpired/i, icon: '\uD83D\uDD04', text: 'Reconnect debounce fired after a network change' },
+            { re: /onResponseHeadersReceived|Http2MuxTransport/i, icon: '\uD83C\uDF10', text: 'HTTP/2 response received from the headend' },
+            { re: /captive.?portal/i, icon: '\uD83D\uDCF6', text: 'Captive-portal / reachability check' },
+            { re: /handshake|certificate|\btls\b/i, icon: '\uD83D\uDD12', text: 'TLS handshake / certificate activity' },
+            { re: /posture|DhaPostureClient|\bDHA\b/i, icon: '\uD83D\uDEE1\uFE0F', text: 'Device posture (DHA) activity' },
+            { re: /\btunnel\b/i, icon: '\uD83D\uDEA7', text: 'Tunnel transport activity' },
+            { re: /enroll/i, icon: '\uD83D\uDCDD', text: 'Enrollment activity' },
+            { re: /timed?\s*out|timeout/i, icon: '\u23F1\uFE0F', text: 'A request timed out' },
+            { re: /reconnect|reachab/i, icon: '\uD83D\uDD04', text: 'Reconnect / reachability event' },
+        ];
+        function describeEvidenceLine(raw) {
+            const s = String(raw || '').trim();
+            for (let i = 0; i < EVIDENCE_DESCRIPTORS.length; i += 1) {
+                if (EVIDENCE_DESCRIPTORS[i].re.test(s)) {
+                    return { icon: EVIDENCE_DESCRIPTORS[i].icon, text: EVIDENCE_DESCRIPTORS[i].text };
+                }
+            }
+            // Fallback: derive a readable phrase from the log, stripping the
+            // agent prefix and long hex ids.
+            const cleaned = s
+                .replace(/^csc_zta_agent\[[^\]]*\]\s*[A-Za-z]\/\s*/i, '')
+                .replace(/\b[0-9a-fA-F]{6,}\b/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const method = cleaned.match(/([A-Za-z0-9_]+)::([A-Za-z0-9_]+)\s*\(\)/);
+            if (method) {
+                const after = cleaned.split(')').slice(1).join(')').replace(/^[\s:]+/, '').trim();
+                const words = method[2].replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+                const phrase = after || words;
+                return { icon: '\u2022', text: phrase.charAt(0).toUpperCase() + phrase.slice(1) };
+            }
+            return { icon: '\u2022', text: cleaned || s };
+        }
+
         function resetZtaSummary() {
             if (ztaSummaryHeadline) {
                 ztaSummaryHeadline.textContent = '';
@@ -1839,50 +1880,69 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         el.appendChild(box);
                     }
 
-                    // Evidence tucked behind a compact toggle, shown as clean
-                    // log-sample cards instead of a raw wrapped list.
+                    // Evidence rendered as plain-English rows (what actually
+                    // happened); the raw agent log line is available per row on
+                    // demand.
                     if (groups.length) {
-                        const groupWord = groups.length === 1 ? 'sample' : 'samples';
+                        const typeWord = groups.length === 1 ? 'event type' : 'event types';
                         const toggle = document.createElement('button');
                         toggle.type = 'button';
                         toggle.className = 'dh-evidence-toggle';
                         toggle.setAttribute('aria-expanded', 'false');
                         const setToggleLabel = (open) => {
-                            toggle.textContent = `${open ? '\u25be Hide' : '\u25b8 Show'} log evidence (${groups.length} ${groupWord})`;
+                            toggle.textContent = `${open ? '\u25be Hide' : '\u25b8 Show'} what was logged (${groups.length} ${typeWord})`;
                         };
                         setToggleLabel(false);
-                        const evidence = document.createElement('div');
-                        evidence.className = 'dh-evlog';
-                        evidence.style.display = 'none';
+                        const list = document.createElement('div');
+                        list.className = 'dh-evlist';
+                        list.style.display = 'none';
                         groups.forEach((group) => {
-                            const item = document.createElement('div');
-                            item.className = 'dh-evlog-item';
-                            const meta = document.createElement('div');
-                            meta.className = 'dh-evlog-meta';
-                            const count = document.createElement('span');
-                            count.className = 'dh-evlog-count';
+                            const desc = describeEvidenceLine(group.label);
+                            const row = document.createElement('div');
+                            row.className = 'dh-evrow';
+                            const icon = document.createElement('span');
+                            icon.className = 'dh-evrow-icon';
+                            icon.textContent = desc.icon;
+                            const main = document.createElement('div');
+                            main.className = 'dh-evrow-main';
+                            const text = document.createElement('div');
+                            text.className = 'dh-evrow-text';
+                            text.textContent = desc.text;
+                            const raw = document.createElement('code');
+                            raw.className = 'dh-evrow-raw';
+                            raw.textContent = String(group.label || '');
+                            const rawBtn = document.createElement('button');
+                            rawBtn.type = 'button';
+                            rawBtn.className = 'dh-evrow-rawbtn';
+                            rawBtn.textContent = 'view raw log';
+                            rawBtn.setAttribute('aria-expanded', 'false');
+                            rawBtn.addEventListener('click', () => {
+                                const open = raw.style.display === 'block';
+                                raw.style.display = open ? 'none' : 'block';
+                                rawBtn.textContent = open ? 'view raw log' : 'hide raw log';
+                                rawBtn.setAttribute('aria-expanded', String(!open));
+                            });
+                            main.appendChild(text);
+                            main.appendChild(rawBtn);
+                            main.appendChild(raw);
                             const n = num(group.count);
+                            const count = document.createElement('span');
+                            count.className = 'dh-evrow-count';
                             count.textContent = `${n}\u00d7`;
-                            const tag = document.createElement('span');
-                            tag.className = 'dh-evlog-tag';
-                            tag.textContent = n === 1 ? 'occurrence' : 'occurrences';
-                            meta.appendChild(count);
-                            meta.appendChild(tag);
-                            const code = document.createElement('code');
-                            code.className = 'dh-evlog-line';
-                            code.textContent = String(group.label || '');
-                            item.appendChild(meta);
-                            item.appendChild(code);
-                            evidence.appendChild(item);
+                            count.title = `${n} ${n === 1 ? 'occurrence' : 'occurrences'}`;
+                            row.appendChild(icon);
+                            row.appendChild(main);
+                            row.appendChild(count);
+                            list.appendChild(row);
                         });
                         toggle.addEventListener('click', () => {
-                            const open = evidence.style.display !== 'none';
-                            evidence.style.display = open ? 'none' : 'flex';
+                            const open = list.style.display !== 'none';
+                            list.style.display = open ? 'none' : 'flex';
                             toggle.setAttribute('aria-expanded', String(!open));
                             setToggleLabel(!open);
                         });
                         el.appendChild(toggle);
-                        el.appendChild(evidence);
+                        el.appendChild(list);
                     }
 
                     ztaSummaryTiles.appendChild(el);

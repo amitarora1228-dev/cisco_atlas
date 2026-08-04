@@ -147,27 +147,31 @@
             color: var(--accent); background: none; border: none; cursor: pointer;
             padding: 0; display: inline-flex; align-items: center; gap: 0.3rem;
         }
-        .dh-evlog { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; max-height: 22rem; overflow-y: auto; }
-        .dh-evlog-item {
-            border: 1px solid var(--border-main); border-left: 3px solid var(--accent);
-            border-radius: 0.5rem; background: var(--surface-soft); padding: 0.5rem 0.6rem;
-            display: flex; flex-direction: column; gap: 0.4rem;
+        .dh-evlist { margin-top: 0.5rem; display: flex; flex-direction: column; max-height: 24rem; overflow-y: auto; }
+        .dh-evrow {
+            display: flex; align-items: flex-start; gap: 0.6rem;
+            padding: 0.55rem 0.3rem; border-bottom: 1px solid var(--border-main);
         }
-        .dh-evlog-meta { display: flex; align-items: center; gap: 0.45rem; }
-        .dh-evlog-count {
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 800; font-size: 0.72rem;
-            padding: 0.08rem 0.45rem; border-radius: 0.35rem; background: var(--accent); color: #fff;
+        .dh-evrow:last-child { border-bottom: none; }
+        .dh-evrow-icon { flex: none; width: 1.5rem; text-align: center; font-size: 1rem; line-height: 1.4; }
+        .dh-evrow-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+        .dh-evrow-text { font-size: 0.9rem; line-height: 1.45; color: var(--text-main); }
+        .dh-evrow-rawbtn {
+            align-self: flex-start; font-size: 0.72rem; font-weight: 700; color: var(--accent);
+            background: none; border: none; cursor: pointer; padding: 0;
         }
-        .dh-evlog-tag {
-            font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em;
-            text-transform: uppercase; color: var(--text-muted);
-        }
-        .dh-evlog-line {
-            display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: 0.76rem; line-height: 1.5; color: var(--text-main);
+        .dh-evrow-rawbtn:hover { text-decoration: underline; }
+        .dh-evrow-raw {
+            display: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.74rem; line-height: 1.5; color: var(--text-muted);
             background: var(--surface-bg); border: 1px solid var(--border-main);
             border-radius: 0.4rem; padding: 0.4rem 0.55rem; overflow-x: auto;
             white-space: pre-wrap; word-break: break-word;
+        }
+        .dh-evrow-count {
+            flex: none; margin-top: 0.05rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-weight: 800; font-size: 0.74rem; padding: 0.1rem 0.5rem; border-radius: 0.4rem;
+            background: var(--surface-soft); color: var(--text-main); border: 1px solid var(--border-main);
         }
 
         .dh-nextstep {

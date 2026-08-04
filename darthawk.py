@@ -4764,10 +4764,27 @@ def build_zta_preview_signals(root_dir):
     enrollment_failure_lines = []
     completion_phrase = "Notifying enrollment completion with result:"
 
+    # Heuristics to tell whether enrollment is SAML/SSO-based or
+    # certificate-based, so we can surface the matching remediation guide.
+    enrollment_saml_hits = 0
+    enrollment_cert_hits = 0
+    saml_marker_re = re.compile(
+        r"\bsaml\b|\bsso\b|\bidp\b|samlrequest|samlresponse|browser.?based|\bassertion\b|openid|oauth",
+        re.IGNORECASE,
+    )
+    cert_marker_re = re.compile(
+        r"\bscep\b|\bx509\b|\bcsr\b|pkcs|cert(?:ificate)?[-_ ]?(?:based|enroll)|client\s*certificate|device\s*certificate|certenroll",
+        re.IGNORECASE,
+    )
+
     for log_path in zta_log_paths:
         try:
             with open(log_path, "r", encoding="utf-8", errors="ignore") as handle:
                 for raw_line in handle:
+                    if saml_marker_re.search(raw_line):
+                        enrollment_saml_hits += 1
+                    if cert_marker_re.search(raw_line):
+                        enrollment_cert_hits += 1
                     if "new redirected flow:" in raw_line:
                         parsed_flow = parse_new_redirected_flow_line(raw_line)
                         if parsed_flow:
@@ -4931,6 +4948,38 @@ def build_zta_preview_signals(root_dir):
 
     # Enrollment.
     if enrollment_failures > 0:
+        cert_enroll_suggestions = [
+            {"heading": "Certificate-based enrollments"},
+            "Follow this guide: https://securitydocs.cisco.com/docs/csa/olh/121612.dita and https://www.cisco.com/c/en/us/support/docs/security/secure-access/225387-configure-secure-access-ztna-auto.html",
+            "Check and make sure Duo Desktop is installed and all Duo services are running.",
+            "Try the latest Cisco Secure Client version if the current version is old.",
+            "Collect a DART bundle with detailed ZTA tracing and upload it to the case. The Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
+        ]
+        saml_enroll_suggestions = [
+            {"heading": "SAML-based enrollments"},
+            "Follow this guide: https://securitydocs.cisco.com/docs/csa/olh/121613.dita",
+            "Check and make sure Duo Desktop is installed and all Duo services are running.",
+            "Try the latest Cisco Secure Client version if the current version is old.",
+            "Collect a DART bundle with detailed ZTA tracing. The Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
+        ]
+        if enrollment_cert_hits and not enrollment_saml_hits:
+            enrollment_auth_method = "cert"
+        elif enrollment_saml_hits and not enrollment_cert_hits:
+            enrollment_auth_method = "saml"
+        elif enrollment_cert_hits > enrollment_saml_hits:
+            enrollment_auth_method = "cert"
+        elif enrollment_saml_hits > enrollment_cert_hits:
+            enrollment_auth_method = "saml"
+        else:
+            enrollment_auth_method = "both"
+
+        if enrollment_auth_method == "cert":
+            enrollment_suggestions = list(cert_enroll_suggestions)
+        elif enrollment_auth_method == "saml":
+            enrollment_suggestions = list(saml_enroll_suggestions)
+        else:
+            enrollment_suggestions = cert_enroll_suggestions + saml_enroll_suggestions
+
         assessment.append({
             "label": "Enrollment",
             "severity": "critical",
@@ -4939,11 +4988,7 @@ def build_zta_preview_signals(root_dir):
             "summary": f"{enrollment_failures} of {enrollment_total} enrollment attempts reported an error.",
             "meaning": "The device could not fully enroll into Zero Trust Access.",
             "impact": "Private-app access through ZTA will not work until enrollment succeeds.",
-            "suggestions": [
-                "Confirm the device can reach the ZTA enrollment endpoint (headend / SSE) and that DNS resolves it.",
-                "Check the enrollment certificate and device posture (DHA) state in the ZTA enrollment JSON.",
-                "Have the user sign out and re-enroll Zero Trust Access from Cisco Secure Client.",
-            ],
+            "suggestions": enrollment_suggestions,
             "groups": group_evidence_lines(enrollment_failure_lines),
         })
     elif enrollment_total > 0:

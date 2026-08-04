@@ -140,6 +140,11 @@
         }
         .dh-suggest ul { margin: 0.35rem 0 0; padding-left: 1.15rem; list-style: disc; }
         .dh-suggest li { font-size: 0.88rem; color: var(--text-main); line-height: 1.5; margin-bottom: 0.25rem; }
+        .dh-suggest-subhead {
+            margin-top: 0.65rem; font-size: 0.82rem; font-weight: 800;
+            color: var(--text-main); letter-spacing: 0.01em;
+        }
+        .dh-suggest-subhead:first-of-type { margin-top: 0.35rem; }
         .dh-suggest-link { color: var(--accent); font-weight: 700; text-decoration: underline; word-break: break-all; }
 
         .dh-evidence-toggle {

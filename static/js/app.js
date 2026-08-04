@@ -1770,7 +1770,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     const sev = card.severity === 'critical' ? 'critical' : 'warning';
                     const groups = Array.isArray(card.groups) ? card.groups : [];
                     const suggestions = Array.isArray(card.suggestions)
-                        ? card.suggestions.filter((item) => String(item || '').trim()) : [];
+                        ? card.suggestions.filter((item) => (item && typeof item === 'object' && item.heading) || String(item || '').trim()) : [];
 
                     const el = document.createElement('div');
                     el.className = `dh-issue sev-${sev}`;
@@ -1876,13 +1876,27 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         label.className = 'dh-suggest-label';
                         label.textContent = '\uD83D\uDCA1 Suggested next steps';
                         box.appendChild(label);
-                        const list = document.createElement('ul');
+                        let list = null;
+                        const ensureList = () => {
+                            if (!list) {
+                                list = document.createElement('ul');
+                                box.appendChild(list);
+                            }
+                            return list;
+                        };
                         suggestions.forEach((item) => {
+                            if (item && typeof item === 'object' && item.heading) {
+                                const subhead = document.createElement('div');
+                                subhead.className = 'dh-suggest-subhead';
+                                subhead.textContent = String(item.heading);
+                                box.appendChild(subhead);
+                                list = null;
+                                return;
+                            }
                             const li = document.createElement('li');
                             appendTextWithLinks(li, String(item));
-                            list.appendChild(li);
+                            ensureList().appendChild(li);
                         });
-                        box.appendChild(list);
                         el.appendChild(box);
                     }
 

@@ -5019,7 +5019,6 @@ def build_zta_preview_signals(root_dir):
             "suggestions": [
                 "Check the failing Flows above - repeatedly failing redirected flows can drive these server-connectivity events.",
                 "Verify the ZTA network requirements are met: allow *.ztna.sse.cisco.com, *.zpc.sse.cisco.com and *.tia.sse.cisco.com on 443 (TCP and UDP). See https://securitydocs.cisco.com/docs/csa/olh/118990.dita",
-                "Check whether the DoH resolver / headend was unreachable (DNS timeouts or captive-portal issues on the user's network).",
                 "Correlate the timestamps with network changes (Wi-Fi switch, VPN connect/disconnect, TND) to explain the reconnects.",
             ],
             "groups": group_evidence_lines(connectivity_lines),

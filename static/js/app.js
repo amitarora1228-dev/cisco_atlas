@@ -1508,19 +1508,21 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         // Translate a raw agent log line into a plain-English description so
         // the snapshot stays readable; the raw line is still available on demand.
         const EVIDENCE_DESCRIPTORS = [
+            { re: /CIpcPipesConnection|\\pipe\\com\.cisco\.secureclient|AsyncSendPayload/i, icon: '\uD83D\uDD0C', text: 'Local IPC channel to the ZTA service' },
             { re: /closeStatus\s*=\s*RequestTimedOut/i, icon: '\u23F1\uFE0F', text: 'Connection closed after the request timed out' },
             { re: /DnsFlowHandler::handleRequestTimeout/i, icon: '\u23F1\uFE0F', text: 'DNS request timed out' },
             { re: /DnsFlowHandler::handleClose/i, icon: '\u23F1\uFE0F', text: 'DNS flow closed on a request timeout' },
+            { re: /DohClient|OnDohRequestComplete|dns-query/i, icon: '\uD83C\uDF10', text: 'DNS-over-HTTPS query to Secure Access' },
             { re: /OnNetworkChange/i, icon: '\uD83D\uDD04', text: 'Network change detected (Wi-Fi / adapter change)' },
             { re: /debounce timer|handleDebounceTimerExpired/i, icon: '\uD83D\uDD04', text: 'Reconnect debounce fired after a network change' },
-            { re: /onResponseHeadersReceived|Http2MuxTransport/i, icon: '\uD83C\uDF10', text: 'HTTP/2 response received from the headend' },
+            { re: /onResponseHeadersReceived/i, icon: '\uD83C\uDF10', text: 'HTTP/2 response received from the headend' },
+            { re: /tunnel cannot receive/i, icon: '\uD83D\uDEA7', text: 'Transport tunnel not ready to receive data' },
+            { re: /Http2MuxTransport/i, icon: '\uD83D\uDEA7', text: 'HTTP/2 transport activity' },
             { re: /captive.?portal/i, icon: '\uD83D\uDCF6', text: 'Captive-portal / reachability check' },
             { re: /handshake|certificate|\btls\b/i, icon: '\uD83D\uDD12', text: 'TLS handshake / certificate activity' },
             { re: /posture|DhaPostureClient|\bDHA\b/i, icon: '\uD83D\uDEE1\uFE0F', text: 'Device posture (DHA) activity' },
             { re: /\btunnel\b/i, icon: '\uD83D\uDEA7', text: 'Tunnel transport activity' },
             { re: /enroll/i, icon: '\uD83D\uDCDD', text: 'Enrollment activity' },
-            { re: /timed?\s*out|timeout/i, icon: '\u23F1\uFE0F', text: 'A request timed out' },
-            { re: /reconnect|reachab/i, icon: '\uD83D\uDD04', text: 'Reconnect / reachability event' },
         ];
         function describeEvidenceLine(raw) {
             const s = String(raw || '').trim();
@@ -1529,8 +1531,8 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     return { icon: EVIDENCE_DESCRIPTORS[i].icon, text: EVIDENCE_DESCRIPTORS[i].text };
                 }
             }
-            // Fallback: derive a readable phrase from the log, stripping the
-            // agent prefix and long hex ids.
+            // Fallback: humanize the Class::method() into a readable phrase so
+            // distinct log lines get distinct, non-cryptic labels.
             const cleaned = s
                 .replace(/^csc_zta_agent\[[^\]]*\]\s*[A-Za-z]\/\s*/i, '')
                 .replace(/\b[0-9a-fA-F]{6,}\b/g, '')
@@ -1538,12 +1540,16 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 .trim();
             const method = cleaned.match(/([A-Za-z0-9_]+)::([A-Za-z0-9_]+)\s*\(\)/);
             if (method) {
-                const after = cleaned.split(')').slice(1).join(')').replace(/^[\s:]+/, '').trim();
-                const words = method[2].replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
-                const phrase = after || words;
-                return { icon: '\u2022', text: phrase.charAt(0).toUpperCase() + phrase.slice(1) };
+                const words = method[2]
+                    .replace(/_/g, ' ')
+                    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+                    .toLowerCase()
+                    .trim();
+                const phrase = words.charAt(0).toUpperCase() + words.slice(1);
+                return { icon: '\u2139\uFE0F', text: phrase };
             }
-            return { icon: '\u2022', text: cleaned || s };
+            const short = cleaned.length > 90 ? cleaned.slice(0, 90).trim() + '\u2026' : cleaned;
+            return { icon: '\u2139\uFE0F', text: short || s };
         }
 
         function resetZtaSummary() {
@@ -1880,9 +1886,8 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         el.appendChild(box);
                     }
 
-                    // Evidence rendered as plain-English rows (what actually
-                    // happened); the raw agent log line is available per row on
-                    // demand.
+                    // Evidence rendered as plain-English rows describing what
+                    // was logged (no raw developer log lines).
                     if (groups.length) {
                         const typeWord = groups.length === 1 ? 'event type' : 'event types';
                         const toggle = document.createElement('button');
@@ -1903,35 +1908,16 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                             const icon = document.createElement('span');
                             icon.className = 'dh-evrow-icon';
                             icon.textContent = desc.icon;
-                            const main = document.createElement('div');
-                            main.className = 'dh-evrow-main';
                             const text = document.createElement('div');
                             text.className = 'dh-evrow-text';
                             text.textContent = desc.text;
-                            const raw = document.createElement('code');
-                            raw.className = 'dh-evrow-raw';
-                            raw.textContent = String(group.label || '');
-                            const rawBtn = document.createElement('button');
-                            rawBtn.type = 'button';
-                            rawBtn.className = 'dh-evrow-rawbtn';
-                            rawBtn.textContent = 'view raw log';
-                            rawBtn.setAttribute('aria-expanded', 'false');
-                            rawBtn.addEventListener('click', () => {
-                                const open = raw.style.display === 'block';
-                                raw.style.display = open ? 'none' : 'block';
-                                rawBtn.textContent = open ? 'view raw log' : 'hide raw log';
-                                rawBtn.setAttribute('aria-expanded', String(!open));
-                            });
-                            main.appendChild(text);
-                            main.appendChild(rawBtn);
-                            main.appendChild(raw);
                             const n = num(group.count);
                             const count = document.createElement('span');
                             count.className = 'dh-evrow-count';
                             count.textContent = `${n}\u00d7`;
                             count.title = `${n} ${n === 1 ? 'occurrence' : 'occurrences'}`;
                             row.appendChild(icon);
-                            row.appendChild(main);
+                            row.appendChild(text);
                             row.appendChild(count);
                             list.appendChild(row);
                         });

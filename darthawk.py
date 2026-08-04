@@ -5009,7 +5009,7 @@ def build_zta_preview_signals(root_dir):
             "chip": plural(connectivity_count, "event"),
             "metric": "Headend reachability",
             "summary": f"{plural(connectivity_count, 'reachability / reconnect event')} were logged, grouped by cause below.",
-            "meaning": "The agent logged reconnect or reachability activity to the ZTA headend / DoH resolver. High counts are usually transient retries rather than a hard outage.",
+            "meaning": "Check reachability to the ZTA headend / DoH resolver. To isolate further, take Wireshark captures on the client side and collect detailed ZTA-level tracing.",
             "impact": "Occasional reconnects are normal; only a sustained failure would block private-app access and DNS steering.",
             "diagram": {
                 "source": "Cisco Secure Client (ZTA)",

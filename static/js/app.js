@@ -955,6 +955,13 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             heading.appendChild(headingMeta);
             enrollmentAttemptsWrap.appendChild(heading);
 
+            const detectedLabel = payload.auth_method_label
+                || (payload.auth_method === 'Cert' ? 'Certificate-based Auth' : 'SAML-based Auth');
+            const subtitle = document.createElement('div');
+            subtitle.className = 'mb-3 -mt-2 text-xs font-semibold text-slate-400';
+            subtitle.textContent = `Auto-detected enrollment type: ${detectedLabel}`;
+            enrollmentAttemptsWrap.appendChild(subtitle);
+
             const scroll = document.createElement('div');
             scroll.className = 'max-h-80 overflow-auto';
             const table = document.createElement('table');
@@ -6360,17 +6367,6 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 moduleInput.value === 'ZTA'
                 && normalizedZtaModeValue === 'SPA'
                 && selectedSpaCheck
-                && selectedSpaCheck.value === 'Check Enrollment Errors'
-                && !selectedEnrollmentType
-            ) {
-                alert('Please select Cert or SAML for Enrollment Failures check.');
-                return;
-            }
-
-            if (
-                moduleInput.value === 'ZTA'
-                && normalizedZtaModeValue === 'SPA'
-                && selectedSpaCheck
                 && selectedSpaCheck.value === 'SRV Check'
                 && !srvFlowFilterInput.value.trim()
                 && (srvFlowStartTime && srvFlowStartTime.value || srvFlowEndTime && srvFlowEndTime.value)
@@ -6571,12 +6567,15 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         && normalizedZtaModeValue === 'SPA'
                         && selectedSpaCheck
                         && selectedSpaCheck.value === 'Check Enrollment Errors'
-                        && selectedEnrollmentType
-                        && (selectedEnrollmentType.value === 'Cert' || selectedEnrollmentType.value === 'SAML')
                     );
 
                     if (shouldShowEnrollmentResultDownloadLink) {
-                        const enrollmentType = String(selectedEnrollmentType.value || 'enrollment').toLowerCase();
+                        const detectedMethod = (
+                            data.enrollment_flow
+                            && typeof data.enrollment_flow === 'object'
+                            && data.enrollment_flow.auth_method
+                        ) || 'enrollment';
+                        const enrollmentType = String(detectedMethod).toLowerCase();
                         setEnrollmentResultDownloadLinkState(
                             true,
                             `enrollment_${enrollmentType}_result.log`,

@@ -5988,12 +5988,6 @@ def analyze():
             return jsonify({"error": "SIA currently supports only Check Cached Config or Check SIA Flow or Check Trusted Network Detection or Check User Pause Config"}), 400
         if spa_check_option in checks_requiring_target and not spa_target_value:
             return jsonify({"error": "Please provide IP or FQDN for the selected check"}), 400
-        if (
-            zta_access_mode == 'SPA'
-            and spa_check_option == 'Check Enrollment Errors'
-            and spa_enrollment_error_type not in {'Cert', 'SAML'}
-        ):
-            return jsonify({"error": "Please select Cert or SAML for Enrollment Failures check"}), 400
 
     flow_filter_start_dt = parse_ui_datetime_local(flow_filter_time_start)
     flow_filter_end_dt = parse_ui_datetime_local(flow_filter_time_end)
@@ -6157,77 +6151,88 @@ def analyze():
                 and zta_access_mode == 'SPA'
                 and spa_check_option == 'Check Enrollment Errors'
             ):
-                if spa_enrollment_error_type == 'Cert':
-                    cert_choice_files = find_cert_enrollment_choice_json_files(
-                        temp_dir,
-                        known_org_ids=org_id_results.get("org_ids", []),
-                    )
+                # Enrollment type is auto-detected from the logs; the user no
+                # longer selects Cert vs SAML manually. Extract both traces and
+                # decide which authentication method the enrollment used.
+                known_org_ids = org_id_results.get("org_ids", [])
+                cert_choice_files = find_cert_enrollment_choice_json_files(
+                    temp_dir,
+                    known_org_ids=known_org_ids,
+                )
 
-                    cert_trace = extract_cert_auto_enrollment_trace(temp_dir)
-                    cert_attempts = cert_trace.get("attempts") or []
+                cert_trace = extract_cert_auto_enrollment_trace(temp_dir)
+                cert_attempts = cert_trace.get("attempts") or []
+                saml_trace = extract_saml_auto_enrollment_trace(temp_dir)
+                saml_attempts = saml_trace.get("attempts") or []
 
-                    if cert_attempts:
-                        enrollment_flow_payload = {
-                            "auth_method": "Cert",
-                            "identifier": cert_attempts[-1].get("identifier", ""),
-                            "attempts": [
-                                {
-                                    "index": idx,
-                                    "identifier": attempt.get("identifier", ""),
-                                    "trace_lines": attempt.get("trace_lines", []),
-                                }
-                                for idx, attempt in enumerate(cert_attempts, start=1)
-                            ],
-                        }
+                filename_method = detect_auth_method_from_enrollment_choice_files(
+                    temp_dir,
+                    known_org_ids=known_org_ids,
+                )
 
-                    if cert_choice_files:
-                        mock_report += "\n[Enrollment Choice JSON - Cert]\n"
-                        mock_report += render_json_files_for_report(cert_choice_files, temp_dir)
-                        mock_report += "\n"
-
-                    if cert_attempts:
-                        mock_report += "\n"
-                        mock_report += f"Total Enrollment Attempts: {len(cert_attempts)}\n\n"
-                        for attempt_index, attempt in enumerate(cert_attempts, start=1):
-                            mock_report += f"Enrollment Attempt {attempt_index}\n"
-                            mock_report += "-------------------\n"
-                            for trace_line in attempt.get("trace_lines", []):
-                                mock_report += f"{trace_line}\n"
-                            if attempt_index < len(cert_attempts):
-                                mock_report += "\n"
-
-                    if not cert_choice_files and not cert_attempts:
-                        mock_report += "\nNo matching logs found.\n"
-                else:
-                    saml_trace = extract_saml_auto_enrollment_trace(temp_dir)
-                    saml_attempts = saml_trace.get("attempts") or []
-
-                    if saml_attempts:
-                        enrollment_flow_payload = {
-                            "auth_method": "SAML",
-                            "identifier": saml_attempts[-1].get("identifier", ""),
-                            "attempts": [
-                                {
-                                    "index": idx,
-                                    "identifier": attempt.get("identifier", ""),
-                                    "trace_lines": attempt.get("trace_lines", []),
-                                }
-                                for idx, attempt in enumerate(saml_attempts, start=1)
-                            ],
-                        }
-
-                    if saml_attempts:
-                        mock_report += "\n"
-                        mock_report += f"Total Enrollment Attempts: {len(saml_attempts)}\n\n"
-                        for attempt_index, attempt in enumerate(saml_attempts, start=1):
-                            mock_report += f"Enrollment Attempt {attempt_index}\n"
-                            mock_report += "-------------------\n"
-                            for trace_line in attempt.get("trace_lines", []):
-                                mock_report += f"{trace_line}\n"
-                            if attempt_index < len(saml_attempts):
-                                mock_report += "\n"
+                if cert_attempts and not saml_attempts:
+                    detected_method = 'Cert'
+                elif saml_attempts and not cert_attempts:
+                    detected_method = 'SAML'
+                elif cert_attempts and saml_attempts:
+                    if filename_method == 'Cert-based Auth':
+                        detected_method = 'Cert'
+                    elif filename_method == 'SAML-based Auth':
+                        detected_method = 'SAML'
                     else:
-                        mock_report += "\nNo matching logs found.\n"
+                        detected_method = (
+                            'Cert' if len(cert_attempts) >= len(saml_attempts) else 'SAML'
+                        )
+                elif filename_method == 'SAML-based Auth':
+                    detected_method = 'SAML'
+                elif filename_method == 'Cert-based Auth':
+                    detected_method = 'Cert'
+                else:
+                    detected_method = ''
+
+                if detected_method == 'Cert':
+                    detected_attempts = cert_attempts
+                    detected_method_label = 'Certificate-based Auth'
+                elif detected_method == 'SAML':
+                    detected_attempts = saml_attempts
+                    detected_method_label = 'SAML-based Auth'
+                else:
+                    detected_attempts = []
+                    detected_method_label = ''
+
+                if detected_attempts:
+                    enrollment_flow_payload = {
+                        "auth_method": detected_method,
+                        "auth_method_label": detected_method_label,
+                        "identifier": detected_attempts[-1].get("identifier", ""),
+                        "attempts": [
+                            {
+                                "index": idx,
+                                "identifier": attempt.get("identifier", ""),
+                                "trace_lines": attempt.get("trace_lines", []),
+                            }
+                            for idx, attempt in enumerate(detected_attempts, start=1)
+                        ],
+                    }
+
+                if detected_method == 'Cert' and cert_choice_files:
+                    mock_report += "\n[Enrollment Choice JSON - Cert]\n"
+                    mock_report += render_json_files_for_report(cert_choice_files, temp_dir)
+                    mock_report += "\n"
+
+                if detected_attempts:
+                    mock_report += "\n"
+                    mock_report += f"Detected Enrollment Type: {detected_method_label}\n"
+                    mock_report += f"Total Enrollment Attempts: {len(detected_attempts)}\n\n"
+                    for attempt_index, attempt in enumerate(detected_attempts, start=1):
+                        mock_report += f"Enrollment Attempt {attempt_index}\n"
+                        mock_report += "-------------------\n"
+                        for trace_line in attempt.get("trace_lines", []):
+                            mock_report += f"{trace_line}\n"
+                        if attempt_index < len(detected_attempts):
+                            mock_report += "\n"
+                elif not (detected_method == 'Cert' and cert_choice_files):
+                    mock_report += "\nNo matching logs found.\n"
 
             if (
                 selected_module == 'ZTA'

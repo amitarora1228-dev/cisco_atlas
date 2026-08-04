@@ -237,22 +237,9 @@
                 </div>
 
                 <div id="spaEnrollmentTypeWrap" class="hidden mt-3">
-                    <label class="block text-sky-300 font-bold tracking-wide text-sm mb-2">
-                        Enrollment Failures - Select Type
-                    </label>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <input type="radio" name="spa_enrollment_error_type" id="spa-enrollment-cert" value="Cert" class="hidden radio-custom">
-                            <label for="spa-enrollment-cert" class="block text-center border border-slate-500 text-slate-300 rounded-lg p-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
-                                Cert
-                            </label>
-                        </div>
-                        <div>
-                            <input type="radio" name="spa_enrollment_error_type" id="spa-enrollment-saml" value="SAML" class="hidden radio-custom">
-                            <label for="spa-enrollment-saml" class="block text-center border border-slate-500 text-slate-300 rounded-lg p-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
-                                SAML
-                            </label>
-                        </div>
+                    <div class="rounded-lg border border-slate-500/60 bg-white/5 p-3 text-sm text-slate-300">
+                        <span class="font-bold text-sky-300">Enrollment type is auto-detected.</span>
+                        Click <span class="font-semibold">Initiate Analysis</span> and DartHawk determines whether the enrollment used Certificate-based or SAML-based authentication directly from the logs.
                     </div>
                     <div id="enrollmentQuickActionAnchor"></div>
                 </div>

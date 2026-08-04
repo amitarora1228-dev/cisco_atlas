@@ -5090,6 +5090,7 @@ def build_zta_preview_signals(root_dir):
             "summary": f"{plural(flow_count, 'flow')} were steered through Zero Trust Access.",
             "meaning": "Private-app traffic was actively redirected through the ZTA tunnel.",
             "impact": "Confirms ZTA steering is functioning.",
+            "group_kind": "destination",
             "groups": flow_groups,
         })
     else:

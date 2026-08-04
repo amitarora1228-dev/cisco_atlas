@@ -1766,6 +1766,109 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             // Container becomes a vertical stack (not a grid).
             ztaSummaryTiles.className = 'mt-4 flex flex-col';
 
+            // --- Top destinations (which destinations flows were steered to) ---
+            (() => {
+                const flowsCard = assessment.find((c) => c.label === 'Flows');
+                const destGroups = flowsCard && flowsCard.group_kind === 'destination' && Array.isArray(flowsCard.groups)
+                    ? flowsCard.groups.filter((g) => g && String(g.label || '').trim()) : [];
+                if (!destGroups.length) { return; }
+                const sorted = destGroups.slice().sort((a, b) => num(b.count) - num(a.count));
+                const maxCount = Math.max(1, ...sorted.map((g) => num(g.count)));
+                const totalCount = sorted.reduce((s, g) => s + num(g.count), 0) || 1;
+                const palette = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#a855f7'];
+
+                const panel = document.createElement('div');
+                panel.className = 'dh-dest-panel';
+
+                const head = document.createElement('div');
+                head.className = 'dh-dest-head';
+                const htitle = document.createElement('span');
+                htitle.className = 'dh-dest-title';
+                htitle.textContent = 'Top destinations';
+                const hsub = document.createElement('span');
+                hsub.className = 'dh-dest-sub';
+                hsub.textContent = `${totalCount} flow${totalCount === 1 ? '' : 's'} across ${sorted.length} destination${sorted.length === 1 ? '' : 's'}`;
+                head.appendChild(htitle);
+                head.appendChild(hsub);
+                panel.appendChild(head);
+
+                const body = document.createElement('div');
+                body.className = 'dh-dest-body';
+
+                // Donut of destination share.
+                const NS = 'http://www.w3.org/2000/svg';
+                const donutWrap = document.createElement('div');
+                donutWrap.className = 'dh-dest-donut';
+                const svg = document.createElementNS(NS, 'svg');
+                svg.setAttribute('viewBox', '0 0 42 42');
+                svg.setAttribute('width', '84'); svg.setAttribute('height', '84');
+                const r = 15.915; const cx = 21; const cy = 21;
+                const track = document.createElementNS(NS, 'circle');
+                track.setAttribute('cx', cx); track.setAttribute('cy', cy); track.setAttribute('r', r);
+                track.setAttribute('fill', 'transparent'); track.setAttribute('stroke', 'var(--border-main)'); track.setAttribute('stroke-width', '5');
+                svg.appendChild(track);
+                let dOffset = 25;
+                sorted.forEach((g, i) => {
+                    const pct = (num(g.count) / totalCount) * 100;
+                    const c = document.createElementNS(NS, 'circle');
+                    c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r);
+                    c.setAttribute('fill', 'transparent');
+                    c.setAttribute('stroke', palette[i % palette.length]);
+                    c.setAttribute('stroke-width', '5');
+                    c.setAttribute('stroke-dasharray', `${pct} ${100 - pct}`);
+                    c.setAttribute('stroke-dashoffset', String(dOffset));
+                    const t = document.createElementNS(NS, 'title');
+                    t.textContent = `${g.label} \u2014 ${num(g.count)} (${Math.round(pct)}%)`;
+                    c.appendChild(t);
+                    svg.appendChild(c);
+                    dOffset = (dOffset - pct + 100) % 100;
+                });
+                donutWrap.appendChild(svg);
+                body.appendChild(donutWrap);
+
+                // Ranked destination bars (verbatim destination labels).
+                const bars = document.createElement('div');
+                bars.className = 'dh-dest-bars';
+                sorted.forEach((g, i) => {
+                    const n = num(g.count);
+                    const row = document.createElement('div');
+                    row.className = 'dh-evrow';
+                    const main = document.createElement('div');
+                    main.className = 'dh-evrow-main';
+                    const dot = document.createElement('span');
+                    dot.className = 'dh-evrow-icon dh-dest-dot';
+                    dot.style.background = palette[i % palette.length];
+                    const text = document.createElement('div');
+                    text.className = 'dh-evrow-text dh-dest-name';
+                    text.textContent = String(g.label);
+                    text.title = String(g.label);
+                    const count = document.createElement('span');
+                    count.className = 'dh-evrow-count';
+                    count.textContent = `${n}\u00d7`;
+                    count.title = `${n} flow${n === 1 ? '' : 's'}`;
+                    main.appendChild(dot);
+                    main.appendChild(text);
+                    main.appendChild(count);
+                    const meter = document.createElement('div');
+                    meter.className = 'dh-evrow-meter';
+                    const fill = document.createElement('div');
+                    fill.className = 'dh-evrow-meter-fill';
+                    fill.style.width = `${Math.max(4, Math.round((n / maxCount) * 100))}%`;
+                    fill.style.background = palette[i % palette.length];
+                    fill.style.opacity = '0.85';
+                    const pct = Math.round((n / totalCount) * 100);
+                    meter.title = `${n} of ${totalCount} flows (${pct}%)`;
+                    meter.appendChild(fill);
+                    row.appendChild(main);
+                    row.appendChild(meter);
+                    bars.appendChild(row);
+                });
+                body.appendChild(bars);
+
+                panel.appendChild(body);
+                ztaSummaryTiles.appendChild(panel);
+            })();
+
             // --- Issues (expanded inline, no clicking needed) ---
             if (issues.length) {
                 const section = document.createElement('div');

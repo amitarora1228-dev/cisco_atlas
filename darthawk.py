@@ -4872,6 +4872,11 @@ def build_zta_preview_signals(root_dir):
             "summary": f"{enrollment_failures} of {enrollment_total} enrollment attempts reported an error.",
             "meaning": "The device could not fully enroll into Zero Trust Access.",
             "impact": "Private-app access through ZTA will not work until enrollment succeeds.",
+            "suggestions": [
+                "Confirm the device can reach the ZTA enrollment endpoint (headend / SSE) and that DNS resolves it.",
+                "Check the enrollment certificate and device posture (DHA) state in the ZTA enrollment JSON.",
+                "Have the user sign out and re-enroll Zero Trust Access from Cisco Secure Client.",
+            ],
             "groups": group_evidence_lines(enrollment_failure_lines),
         })
     elif enrollment_total > 0:
@@ -4908,6 +4913,11 @@ def build_zta_preview_signals(root_dir):
             "summary": f"{plural(config_sync_count, 'configuration-sync error')} were logged.",
             "meaning": "The agent may be running stale or partial policy because it could not refresh its configuration from the cloud.",
             "impact": "Access decisions could be based on outdated policy until sync recovers.",
+            "suggestions": [
+                "Verify the agent can reach the cloud config service - a proxy or firewall may be blocking policy refresh.",
+                "Check whether the errors cluster around one time or keep repeating (a one-off may have already recovered).",
+                "Confirm the enrolled org / policy is still valid and was not deleted or re-provisioned.",
+            ],
             "groups": group_evidence_lines(config_sync_lines),
         })
     else:
@@ -4933,6 +4943,11 @@ def build_zta_preview_signals(root_dir):
             "summary": f"{plural(connectivity_count, 'reachability / reconnect event')} were logged, grouped below.",
             "meaning": "The agent logged reconnect or reachability activity to the ZTA headend / DoH resolver. High counts are usually transient retries rather than a hard outage.",
             "impact": "Occasional reconnects are normal; only a sustained failure would block private-app access and DNS steering.",
+            "suggestions": [
+                "Investigate only if the events cluster in time or line up with a user-reported outage - a steady trickle is normal.",
+                "Check whether the DoH resolver / headend was unreachable (DNS timeouts or captive-portal issues on the user's network).",
+                "Correlate the timestamps with network changes (Wi-Fi switch, VPN connect/disconnect, TND) to explain the reconnects.",
+            ],
             "groups": group_evidence_lines(connectivity_lines),
         })
     else:
@@ -5020,6 +5035,10 @@ def build_zta_preview_signals(root_dir):
             "summary": "The user paused Zero Trust Access.",
             "meaning": "Traffic steering was suspended by the user.",
             "impact": "Private-app access is disabled while paused - this can explain 'app not working' reports.",
+            "suggestions": [
+                "If the user reported 'app not working', a user pause is the likely cause - confirm whether they paused ZTA intentionally.",
+                "Steering resumes automatically after the configured resume timeout - ask the user to resume ZTA or wait it out.",
+            ],
             "groups": [],
         })
     elif pause_signal.get("status") == "Pause requested":

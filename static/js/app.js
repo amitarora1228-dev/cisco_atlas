@@ -110,6 +110,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         const ztaSummaryPanel = document.getElementById('ztaSummaryPanel');
         const ztaSummaryHeadline = document.getElementById('ztaSummaryHeadline');
         const ztaSummaryVerdict = document.getElementById('ztaSummaryVerdict');
+        const ztaSummaryHint = document.getElementById('ztaSummaryHint');
         const ztaSummaryTiles = document.getElementById('ztaSummaryTiles');
         const aiInsightCard = document.getElementById('aiInsightCard');
         const bundleInsightPanel = document.getElementById('bundleInsightPanel');
@@ -1535,41 +1536,40 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 return;
             }
 
-            // Visual tone per severity level.
-            const SEVERITY = {
-                critical: { rank: 3, ring: 'border-rose-500/50', bg: 'bg-rose-500/10', badge: 'border-rose-500 bg-rose-100 text-rose-700', glyph: '\u2715', label: 'Critical' },
-                warning: { rank: 2, ring: 'border-amber-500/50', bg: 'bg-amber-500/10', badge: 'border-amber-500 bg-amber-100 text-amber-700', glyph: '\u26a0', label: 'Warning' },
-                info: { rank: 1, ring: 'border-sky-500/40', bg: 'bg-sky-500/10', badge: 'border-sky-500 bg-sky-100 text-sky-700', glyph: '\u25cf', label: 'Info' },
-                ok: { rank: 0, ring: 'border-emerald-500/40', bg: 'bg-emerald-500/10', badge: 'border-emerald-500 bg-emerald-100 text-emerald-700', glyph: '\u2713', label: 'OK' },
-            };
-            const toneFor = (severity) => SEVERITY[severity] || SEVERITY.info;
+            const RANK = { critical: 3, warning: 2, info: 1, ok: 0 };
+            const rankOf = (sev) => (sev in RANK ? RANK[sev] : 1);
+            const SEV_LABEL = { critical: 'Critical', warning: 'Warning', info: 'Info', ok: 'OK' };
+            const SEV_GLYPH = { critical: '\u2715', warning: '\u26a0', info: '\u25cf', ok: '\u2713' };
 
-            // Overall verdict banner.
+            const issues = assessment
+                .filter((card) => card.severity === 'critical' || card.severity === 'warning')
+                .sort((a, b) => rankOf(b.severity) - rankOf(a.severity));
+            const healthy = assessment.filter((card) => card.severity === 'info' || card.severity === 'ok');
+
+            // --- Overall verdict banner (clean, theme-aware) ---
             const verdict = signals.verdict && typeof signals.verdict === 'object' ? signals.verdict : {};
-            const verdictLevel = String(verdict.level || 'healthy');
-            const verdictTone = {
-                problem: { border: 'border-rose-500/50', bg: 'bg-rose-500/10', text: 'text-rose-200', glyph: '\u2715', title: 'Problem detected' },
-                degraded: { border: 'border-amber-500/50', bg: 'bg-amber-500/10', text: 'text-amber-100', glyph: '\u26a0', title: 'Degraded' },
-                healthy: { border: 'border-emerald-500/40', bg: 'bg-emerald-500/10', text: 'text-emerald-100', glyph: '\u2713', title: 'Healthy' },
-            }[verdictLevel] || { border: 'border-sky-500/40', bg: 'bg-sky-500/10', text: 'text-sky-100', glyph: '\u25cf', title: 'Status' };
+            const verdictLevel = ['healthy', 'degraded', 'problem'].includes(String(verdict.level))
+                ? String(verdict.level) : 'healthy';
+            const verdictTitle = { healthy: 'Healthy', degraded: 'Degraded', problem: 'Problem detected' }[verdictLevel];
+            const verdictGlyph = { healthy: '\u2713', degraded: '\u26a0', problem: '\u2715' }[verdictLevel];
 
             if (ztaSummaryVerdict) {
-                ztaSummaryVerdict.className = `mt-3 rounded-lg border p-3 ${verdictTone.border} ${verdictTone.bg}`;
+                ztaSummaryVerdict.className = `dh-snap-verdict is-${verdictLevel}`;
                 const vTitle = document.createElement('div');
-                vTitle.className = `flex items-center gap-2 text-sm font-bold ${verdictTone.text}`;
-                vTitle.textContent = `${verdictTone.glyph} ${verdictTone.title}`;
-                const vSummary = document.createElement('div');
-                vSummary.className = 'mt-1 text-xs text-slate-300 leading-relaxed';
-                vSummary.textContent = String(verdict.summary || '');
+                vTitle.className = 'dh-snap-verdict-title';
+                vTitle.textContent = `${verdictGlyph} ${verdictTitle}`;
                 ztaSummaryVerdict.appendChild(vTitle);
                 if (verdict.summary) {
+                    const vSummary = document.createElement('div');
+                    vSummary.className = 'dh-snap-verdict-summary';
+                    vSummary.textContent = String(verdict.summary);
                     ztaSummaryVerdict.appendChild(vSummary);
                 }
             }
 
-            // Headline counters (critical / warning).
-            const criticalCount = assessment.filter((card) => card.severity === 'critical').length;
-            const warningCount = assessment.filter((card) => card.severity === 'warning').length;
+            // Headline pill (top-right of panel).
+            const criticalCount = issues.filter((c) => c.severity === 'critical').length;
+            const warningCount = issues.filter((c) => c.severity === 'warning').length;
             if (ztaSummaryHeadline) {
                 if (criticalCount > 0) {
                     ztaSummaryHeadline.textContent = `\u2715 ${criticalCount} critical`;
@@ -1583,114 +1583,179 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 }
             }
 
-            // Sort cards worst-first so the important ones lead.
-            const ordered = assessment.slice().sort((a, b) => toneFor(b.severity).rank - toneFor(a.severity).rank);
+            if (ztaSummaryHint) {
+                ztaSummaryHint.textContent = issues.length
+                    ? 'Problems needing attention are shown first, with suggested next steps. Healthy checks are summarized below.'
+                    : 'All ZTA health checks passed.';
+            }
 
-            ordered.forEach((card) => {
-                const tone = toneFor(card.severity);
-                const groups = Array.isArray(card.groups) ? card.groups : [];
+            // Container becomes a vertical stack (not a grid).
+            ztaSummaryTiles.className = 'mt-4 flex flex-col';
 
-                const tile = document.createElement('div');
-                tile.className = `rounded-lg border ${tone.ring} ${tone.bg} p-3 transition-colors`;
+            // --- Issues (expanded inline, no clicking needed) ---
+            if (issues.length) {
+                const section = document.createElement('div');
+                section.className = 'dh-snap-section';
+                section.textContent = `Needs attention (${issues.length})`;
+                ztaSummaryTiles.appendChild(section);
 
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'flex w-full items-center justify-between gap-2 text-left';
-                button.setAttribute('aria-expanded', 'false');
+                issues.forEach((card) => {
+                    const sev = card.severity === 'critical' ? 'critical' : 'warning';
+                    const groups = Array.isArray(card.groups) ? card.groups : [];
+                    const suggestions = Array.isArray(card.suggestions)
+                        ? card.suggestions.filter((item) => String(item || '').trim()) : [];
 
-                const headWrap = document.createElement('div');
-                headWrap.className = 'min-w-0';
-                const title = document.createElement('div');
-                title.className = 'text-sm font-bold text-sky-100';
-                title.textContent = card.label || '';
-                const metric = document.createElement('div');
-                metric.className = 'mt-1 text-[11px] font-mono text-slate-400';
-                metric.textContent = card.metric || '';
-                headWrap.appendChild(title);
-                headWrap.appendChild(metric);
+                    const el = document.createElement('div');
+                    el.className = `dh-issue sev-${sev}`;
 
-                const rightWrap = document.createElement('div');
-                rightWrap.className = 'flex shrink-0 items-center gap-2';
-                const badge = document.createElement('span');
-                badge.className = `inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold ${tone.badge}`;
-                badge.textContent = `${tone.glyph} ${card.chip || tone.label}`;
-                const chevron = document.createElement('span');
-                chevron.className = 'text-slate-400 text-xs transition-transform';
-                chevron.textContent = '\u25be';
-                rightWrap.appendChild(badge);
-                rightWrap.appendChild(chevron);
+                    const head = document.createElement('div');
+                    head.className = 'dh-issue-head';
+                    const title = document.createElement('div');
+                    title.className = 'dh-issue-title';
+                    title.textContent = card.label || '';
+                    const badge = document.createElement('span');
+                    badge.className = `dh-issue-badge sev-${sev}`;
+                    badge.textContent = `${SEV_GLYPH[sev]} ${card.chip || SEV_LABEL[sev]}`;
+                    head.appendChild(title);
+                    head.appendChild(badge);
+                    el.appendChild(head);
 
-                button.appendChild(headWrap);
-                button.appendChild(rightWrap);
-                tile.appendChild(button);
-
-                // One-line interpreted summary is always visible under the header.
-                if (card.summary) {
-                    const summaryLine = document.createElement('div');
-                    summaryLine.className = 'mt-2 text-xs text-slate-300 leading-relaxed';
-                    summaryLine.textContent = card.summary;
-                    tile.appendChild(summaryLine);
-                }
-
-                // Drawer: What it means / Impact / grouped evidence (no raw logs).
-                const drawer = document.createElement('div');
-                drawer.className = 'hidden mt-3 border-t border-sky-500/15 pt-2 space-y-2';
-
-                const addBlock = (heading, text) => {
-                    if (!text) {
-                        return;
+                    if (card.summary) {
+                        const summary = document.createElement('div');
+                        summary.className = 'dh-issue-summary';
+                        summary.textContent = card.summary;
+                        el.appendChild(summary);
                     }
-                    const block = document.createElement('div');
-                    const label = document.createElement('div');
-                    label.className = 'text-[10px] font-bold uppercase tracking-wider text-slate-500';
-                    label.textContent = heading;
-                    const body = document.createElement('div');
-                    body.className = 'mt-0.5 text-[11px] text-slate-300 leading-relaxed';
-                    body.textContent = text;
-                    block.appendChild(label);
-                    block.appendChild(body);
-                    drawer.appendChild(block);
-                };
 
-                addBlock('What it means', card.meaning);
-                addBlock('Impact', card.impact);
+                    const addBlock = (heading, text) => {
+                        if (!text) { return; }
+                        const block = document.createElement('div');
+                        block.className = 'dh-issue-block';
+                        const label = document.createElement('div');
+                        label.className = 'dh-issue-block-label';
+                        label.textContent = heading;
+                        const body = document.createElement('div');
+                        body.className = 'dh-issue-block-body';
+                        body.textContent = text;
+                        block.appendChild(label);
+                        block.appendChild(body);
+                        el.appendChild(block);
+                    };
+                    addBlock('What it means', card.meaning);
+                    addBlock('Impact', card.impact);
 
-                if (groups.length) {
-                    const block = document.createElement('div');
-                    const label = document.createElement('div');
-                    label.className = 'text-[10px] font-bold uppercase tracking-wider text-slate-500';
-                    label.textContent = 'Evidence (grouped)';
-                    block.appendChild(label);
-                    const list = document.createElement('div');
-                    list.className = 'mt-1 flex flex-col gap-1 max-h-48 overflow-y-auto';
-                    groups.forEach((group) => {
-                        const row = document.createElement('div');
-                        row.className = 'flex items-start gap-2 text-[11px] leading-relaxed';
-                        const count = document.createElement('span');
-                        count.className = 'shrink-0 rounded bg-slate-700/60 px-1.5 py-0.5 font-mono font-bold text-slate-200';
-                        count.textContent = `${num(group.count)}\u00d7`;
-                        const text = document.createElement('span');
-                        text.className = 'text-slate-300 break-all';
-                        text.textContent = String(group.label || '');
-                        row.appendChild(count);
-                        row.appendChild(text);
-                        list.appendChild(row);
-                    });
-                    block.appendChild(list);
-                    drawer.appendChild(block);
+                    // Suggested next steps (always visible on issues).
+                    if (suggestions.length) {
+                        const box = document.createElement('div');
+                        box.className = 'dh-suggest';
+                        const label = document.createElement('div');
+                        label.className = 'dh-suggest-label';
+                        label.textContent = '\uD83D\uDCA1 Suggested next steps';
+                        box.appendChild(label);
+                        const list = document.createElement('ul');
+                        suggestions.forEach((item) => {
+                            const li = document.createElement('li');
+                            li.textContent = String(item);
+                            list.appendChild(li);
+                        });
+                        box.appendChild(list);
+                        el.appendChild(box);
+                    }
+
+                    // Evidence tucked behind a compact toggle (technical detail).
+                    if (groups.length) {
+                        const toggle = document.createElement('button');
+                        toggle.type = 'button';
+                        toggle.className = 'dh-evidence-toggle';
+                        const groupWord = groups.length === 1 ? 'group' : 'groups';
+                        toggle.textContent = `\u25b8 Evidence (${groups.length} ${groupWord})`;
+                        const evidence = document.createElement('div');
+                        evidence.className = 'dh-evidence';
+                        evidence.style.display = 'none';
+                        groups.forEach((group) => {
+                            const row = document.createElement('div');
+                            row.className = 'dh-evidence-row';
+                            const count = document.createElement('span');
+                            count.className = 'dh-evidence-count';
+                            count.textContent = `${num(group.count)}\u00d7`;
+                            const text = document.createElement('span');
+                            text.className = 'dh-evidence-text';
+                            text.textContent = String(group.label || '');
+                            row.appendChild(count);
+                            row.appendChild(text);
+                            evidence.appendChild(row);
+                        });
+                        toggle.addEventListener('click', () => {
+                            const open = evidence.style.display !== 'none';
+                            evidence.style.display = open ? 'none' : 'flex';
+                            toggle.textContent = `${open ? '\u25b8' : '\u25be'} Evidence (${groups.length} ${groupWord})`;
+                        });
+                        el.appendChild(toggle);
+                        el.appendChild(evidence);
+                    }
+
+                    ztaSummaryTiles.appendChild(el);
+                });
+            }
+
+            // --- Healthy checks folded into one compact "all clear" row ---
+            if (healthy.length) {
+                if (issues.length) {
+                    const section = document.createElement('div');
+                    section.className = 'dh-snap-section';
+                    section.textContent = 'Healthy';
+                    ztaSummaryTiles.appendChild(section);
                 }
 
-                tile.appendChild(drawer);
-
-                button.addEventListener('click', () => {
-                    const isOpen = !drawer.classList.contains('hidden');
-                    drawer.classList.toggle('hidden', isOpen);
-                    button.setAttribute('aria-expanded', String(!isOpen));
-                    chevron.style.transform = isOpen ? 'none' : 'rotate(180deg)';
+                const box = document.createElement('div');
+                box.className = 'dh-allclear';
+                const head = document.createElement('div');
+                head.className = 'dh-allclear-head';
+                const title = document.createElement('span');
+                title.className = 'dh-allclear-title';
+                title.textContent = `\u2713 ${healthy.length} check${healthy.length === 1 ? '' : 's'} healthy`;
+                head.appendChild(title);
+                healthy.forEach((card) => {
+                    const chip = document.createElement('span');
+                    chip.className = `dh-chip${card.severity === 'info' ? ' is-info' : ''}`;
+                    const dot = document.createElement('span');
+                    dot.className = 'dot';
+                    chip.appendChild(dot);
+                    chip.appendChild(document.createTextNode(card.label || ''));
+                    head.appendChild(chip);
                 });
 
-                ztaSummaryTiles.appendChild(tile);
-            });
+                const details = document.createElement('div');
+                details.className = 'dh-allclear-details';
+                healthy.forEach((card) => {
+                    if (!card.summary) { return; }
+                    const row = document.createElement('div');
+                    row.className = 'dh-allclear-detail';
+                    const strong = document.createElement('strong');
+                    strong.textContent = `${card.label}: `;
+                    row.appendChild(strong);
+                    row.appendChild(document.createTextNode(card.summary));
+                    details.appendChild(row);
+                });
+
+                if (details.childNodes.length) {
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'dh-allclear-toggle';
+                    toggle.textContent = 'Details';
+                    toggle.addEventListener('click', () => {
+                        const open = details.classList.toggle('open');
+                        toggle.textContent = open ? 'Hide' : 'Details';
+                    });
+                    head.appendChild(toggle);
+                }
+
+                box.appendChild(head);
+                if (details.childNodes.length) {
+                    box.appendChild(details);
+                }
+                ztaSummaryTiles.appendChild(box);
+            }
 
             ztaSummaryPanel.classList.remove('hidden');
         }

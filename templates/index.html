@@ -3,28 +3,20 @@
 
 {% block content %}
 
-    <div class="glass-panel p-6 md:p-8 rounded-2xl w-full max-w-7xl relative overflow-hidden">
-        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-sky-400 to-transparent"></div>
-        <div class="cisco-brand-badge" aria-label="Cisco Systems">
-            <img
-                src="{{ url_for('static', filename='img/cisco-logo.webp') }}"
-                alt="Cisco Systems Logo"
-                class="cisco-brand-image"
-                onload="this.classList.add('is-loaded');"
-                onerror="this.remove();"
-            />
-        </div>
+    <div class="dh-shell">
+        <aside class="dh-rail">
+            <div class="dh-rail-brand">
+                <div class="dh-rail-logo">D</div>
+                <div>
+                    <div class="dh-rail-name">DartHawk</div>
+                    <div class="dh-rail-tag">Diagnostics</div>
+                </div>
+            </div>
 
-        <div class="text-center mb-8">
-            <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-600 mb-2">DartHawk</h1>
-            <p class="text-sky-200 tracking-wider text-sm uppercase font-bold">Diagnostics & Reporting Tool Analyzer</p>
-        </div>
-
-        <div class="flex flex-col sm:flex-row gap-6 sm:gap-8">
-            <!-- Sidebar: module navigation -->
-            <aside id="moduleSelectionWrap" class="dh-sidebar w-full sm:w-56 shrink-0">
-                <div class="text-sky-400 font-bold tracking-widest text-xs uppercase mb-3">Modules</div>
-                <div class="grid grid-cols-2 gap-2 sm:grid-cols-1">
+            <!-- Module navigation -->
+            <div id="moduleSelectionWrap" class="dh-rail-modules">
+                <div class="dh-rail-section">Modules</div>
+                <div class="grid grid-cols-1 gap-2">
                     <div>
                         <input type="radio" name="module" id="mod-zta" value="ZTA" class="hidden radio-custom" required>
                         <label for="mod-zta" class="dh-nav-item block text-left border border-slate-500 text-slate-300 rounded-lg px-4 py-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
@@ -56,11 +48,30 @@
                         </label>
                     </div>
                 </div>
-                <p class="mt-4 hidden sm:block text-xs text-slate-400 leading-relaxed">Upload a DART bundle, then pick a module to load its analysis options.</p>
-            </aside>
+                <p class="dh-rail-hint">Upload a DART bundle, then pick a module to load its analysis options.</p>
+            </div>
 
-            <!-- Main content -->
-            <div class="dh-main flex-1 min-w-0 space-y-6">
+            <div class="dh-rail-foot">
+                <div class="cisco-brand-badge" aria-label="Cisco Systems">
+                    <img
+                        src="{{ url_for('static', filename='img/cisco-logo.webp') }}"
+                        alt="Cisco Systems Logo"
+                        class="cisco-brand-image"
+                        onload="this.classList.add('is-loaded');"
+                        onerror="this.remove();"
+                    />
+                </div>
+            </div>
+        </aside>
+
+        <div class="dh-canvas">
+            <header class="dh-topbar">
+                <div class="dh-topbar-titles">
+                    <div class="dh-topbar-title">DartHawk</div>
+                    <div class="dh-topbar-sub">Diagnostics &amp; Reporting Tool Analyzer</div>
+                </div>
+            </header>
+            <main class="dh-content space-y-6">
         <form id="uploadForm" class="space-y-6">
             
             <!-- File Input -->
@@ -89,7 +100,7 @@
                     <div id="ztaSummaryHeadline" class="text-sm font-semibold text-sky-100/80"></div>
                 </div>
                 <div id="ztaSummaryVerdict" class="hidden mt-3 rounded-lg border p-3"></div>
-                <div id="ztaSummaryHint" class="mt-3 text-xs text-slate-400">Click a card for a plain-English explanation and grouped evidence.</div>
+                <div id="ztaSummaryHint" class="mt-3 text-sm text-slate-400">Click a card for a plain-English explanation and grouped evidence.</div>
                 <div id="ztaSummaryTiles" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
             </div>
 
@@ -522,8 +533,6 @@
                 <pre id="resultContent" class="text-sm text-sky-200 font-mono whitespace-pre-wrap overflow-x-auto overflow-y-auto min-h-64 max-h-[36rem] resize-y"></pre>
             </div>
         </div>
-            </div>
-        </div>
 
         <div id="readmePanel" class="hidden mt-8 rounded-lg border border-sky-500/30 bg-black/30 p-5">
             <h3 class="text-sky-300 font-bold uppercase tracking-widest text-sm">Read Me &mdash; What is DartHawk?</h3>
@@ -622,6 +631,9 @@
                 </div>
             </form>
         </div>
+            </main>
+        </div>
+    </div>
 
         <button
             type="button"
@@ -632,8 +644,6 @@
         >
             <span class="text-xl leading-none">^</span>
         </button>
-
-    </div>
 
 {% endblock %}
 

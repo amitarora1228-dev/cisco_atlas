@@ -103,17 +103,26 @@ def healthz() -> dict:
     }
 
 
-# Everything the bundle engine can actually answer without a user-supplied
-# target value.
+# Everything the bundle engine can actually answer quickly, without a
+# user-supplied target value.
 #
-# VPN, Umbrella, UZTNA and EDLP are accepted by the engine but not implemented:
-# they return only "[+] Payload received: <file>", and the route still carries
-# the placeholder "(Insert explicit log parsing logic here)". Running them costs
-# a full archive extraction each and produces nothing, so they are excluded until
-# they do something. They remain selectable manually.
+# Excluded and why:
 #
-# Check SIA Flow, Check TCP or UDP Flow and SRV Check each need a destination or
-# identifier from the user, so they cannot be part of a blanket run.
+# * Check Event Viewer Logs - measured at 114.6 s against an 18.5 MB bundle while
+#   every other check runs in 0.8-2.2 s. It is 90 % of a blanket run on its own.
+#   The cost is python-evtx, a pure-Python parser, over 45.8 MB of Windows event
+#   logs in that bundle. Capping records is not a safe substitute: at a 2000
+#   record cap the ZTA channel spends its whole budget on Information records and
+#   never reaches its 8 Errors and 13 Warnings, and the overall Warning/Error/
+#   Critical count drops from 1000 to 343. Truncating this check hides the events
+#   it exists to find, so it stays opt-in rather than silently degraded.
+# * VPN, Umbrella, UZTNA, EDLP - accepted by the engine but not implemented. They
+#   return only a payload-received line and the route still carries a placeholder
+#   where the parsing would go.
+# * Check SIA Flow, Check TCP or UDP Flow, SRV Check - each needs a destination or
+#   identifier from the user.
+#
+# All of them remain available by selecting the module manually.
 _BUNDLE_MATRIX: list[tuple[str, dict]] = [
     (f"ZTA - {check.removeprefix('Check ')}",
      {"module": "ZTA", "zta_access_mode": "SPA", "spa_check_option": check})
@@ -124,9 +133,18 @@ _BUNDLE_MATRIX: list[tuple[str, dict]] = [
         "Check Trusted Network Detection",
         "Check User Pause Config",
         "Check Inclusions or Exclusions",
-        "Check Event Viewer Logs",
     )
 ] + [("Duo Desktop", {"module": "Duo Desktop"})]
+
+# Surfaced to the user so an excluded check is a visible choice, not a silent gap.
+_BUNDLE_EXCLUDED = [
+    {
+        "label": "ZTA - Event Viewer Logs",
+        "reason": "Parsing Windows event logs takes around two minutes on a "
+                  "typical bundle - roughly ten times every other check combined. "
+                  "Select ZTA in the left panel and run it on its own.",
+    }
+]
 
 
 @app.post("/atlas/api/bundle/analyze-all", include_in_schema=False)
@@ -166,7 +184,7 @@ async def analyze_entire_bundle(file: UploadFile = File(...)) -> JSONResponse:
         except Exception as exc:  # noqa: BLE001 - one failing check must not lose the rest
             results.append({"label": label, "ok": False, "text": "", "error": str(exc)})
 
-    return JSONResponse({"results": results})
+    return JSONResponse({"results": results, "excluded": _BUNDLE_EXCLUDED})
 
 
 app.mount("/capture", capture_app)

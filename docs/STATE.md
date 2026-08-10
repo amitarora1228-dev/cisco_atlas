@@ -139,34 +139,50 @@ Both create the venv, install pinned dependencies, check for tshark and serve on
 
 Ordered by how likely they are to bite.
 
-1. **Bundle analysis re-extracts the archive per check.** A run-everything is 8
-   extractions: 105 s on an 18.5 MB bundle, and it scales with size - the 358 MB
-   test bundle will be slow. Fixing it means separating extraction from analysis
-   inside the bundle engine.
-2. **`/atlas/api/bundle/analyze-all` has no test.** Verified by hand against a
+1. **Windows event-log parsing is the single slowest thing in the product.**
+   Measured on an 18.5 MB bundle: `Check Event Viewer Logs` takes **114.6 s**
+   while every other check runs in **0.8-2.2 s**. The cost is `python-evtx`, a
+   pure-Python parser, over **45.8 MB of `.evtx`** in that bundle (12 files, the
+   largest 20.1 MB).
+
+   It is **excluded from run-everything** and shown to the user as a skipped
+   check with the reason, so it is a visible choice rather than a silent gap.
+   Run-everything went from 105 s to **8.9 s**.
+
+   **Do not "fix" this by capping records.** `evtx_max_records_per_file` exists
+   and defaults to 200 000, but at a 2000 cap the ZTA channel spends its entire
+   budget on Information records and never reaches its 8 Errors and 13 Warnings;
+   the overall Warning/Error/Critical count drops from 1000 to 343. Truncating
+   hides exactly the events the check exists to find. A real fix needs a faster
+   parser, or channel and level filtering that does not read every record.
+2. **The bundle engine re-extracts the archive on every check.** Now around 1.3 s
+   per check rather than the dominant cost, but it still scales with bundle size,
+   so the 358 MB test bundle will be slow. Fixing it means separating extraction
+   from analysis inside the engine.
+3. **`/atlas/api/bundle/analyze-all` has no test.** Verified by hand against a
    real bundle only.
-3. **VPN, Umbrella, UZTNA and EDLP are not implemented** in the bundle engine.
+4. **VPN, Umbrella, UZTNA and EDLP are not implemented** in the bundle engine.
    They are accepted and return only a payload-received line; the route still
    carries a placeholder where the parsing would go. Only **ZTA** and **Duo
    Desktop** do real work. They are excluded from run-everything for that reason.
-4. **Tailwind loads from a CDN at runtime** (`cdn.tailwindcss.com`), which
+5. **Tailwind loads from a CDN at runtime** (`cdn.tailwindcss.com`), which
    Tailwind itself warns is not for production, and which is a network dependency
    at page load. Preflight is disabled; a scoped compatibility layer in the bundle
    engine's CSS restores what its markup relied on.
-5. **Three font families load from Google** (Inter; Orbitron and Rajdhani).
+6. **Three font families load from Google** (Inter; Orbitron and Rajdhani).
    Typography is the largest remaining visual divergence.
-6. **`network_info` is not registered** in the capture engine's
+7. **`network_info` is not registered** in the capture engine's
    `CLASSIFICATION_*` tables, so its findings are computed, returned by the API,
    and never rendered.
-7. **`_regress_baseline.json` is stale.**
-8. **The UI surface guard has a blind spot**: it records ids, control names,
+8. **`_regress_baseline.json` is stale.**
+9. **The UI surface guard has a blind spot**: it records ids, control names,
    radio values, select options and button labels. An element with no id that is
    not a form control - the user badge, for instance - can vanish without failing
    a test.
-9. **A HAR was committed and pushed** in `6bd709c` and removed in `df16b9e`. The
-   blob is still reachable in history; removing it needs a force push, which has
-   not been done unilaterally. That bundle output contained a real employee email
-   address and internal AD hostnames.
+10. **A HAR was committed and pushed** in `6bd709c` and removed in `df16b9e`. The
+    blob is still reachable in history; removing it needs a force push, which has
+    not been done unilaterally. That bundle output contained a real employee email
+    address and internal AD hostnames.
 
 ---
 

@@ -235,6 +235,26 @@ body.atlas-workspace {
     border-left-color: var(--atlas-text-subtle);
 }
 
+.atlas-result.is-skipped {
+    border-left-color: var(--atlas-warning);
+    padding: 11px 14px;
+}
+
+.atlas-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    font-size: 0.88rem;
+}
+
+.atlas-result-reason {
+    margin: 6px 0 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--atlas-text-muted);
+}
+
 .atlas-result > summary {
     display: flex;
     align-items: center;

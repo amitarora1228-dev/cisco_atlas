@@ -37,6 +37,19 @@ _CAPTURE_STATIC = (
     / "static"
 )
 
+_SHELL_STATIC = Path(__file__).resolve().parent / "static"
+
+
+def _asset(name: str) -> str:
+    """Shell asset URL stamped with the file's modification time.
+
+    Without this a browser keeps serving a cached stylesheet after an edit, which
+    looks exactly like the edit having no effect.
+    """
+    path = _SHELL_STATIC / name
+    stamp = int(path.stat().st_mtime) if path.exists() else 0
+    return f"/atlas/{name}?v={stamp}"
+
 
 def _split_document(html: str) -> tuple[str, str, list[str], str]:
     """Return (body_inner, body_class, external_script_srcs, head_stylesheets)."""
@@ -126,17 +139,19 @@ def compose() -> str:
         // does, and without it every call would fall back to the ATLAS root.
         window.API_BASE = "/capture";
     </script>
-    <link rel="stylesheet" href="/atlas/atlas-tokens.css">
-    <link rel="stylesheet" href="/atlas/atlas-shell.css">
-    <link rel="stylesheet" href="/atlas/atlas-workspace.css">
+    <link rel="stylesheet" href="{_asset('atlas-tokens.css')}">
+    <link rel="stylesheet" href="{_asset('atlas-shell.css')}">
     {stylesheets}
+    <!-- Loaded after the engines so the shell can override their page-level
+         chrome. Both were written assuming they own the document. -->
+    <link rel="stylesheet" href="{_asset('atlas-workspace.css')}">
 </head>
 <body class="{bun_class} atlas-workspace">
     <div id="atlas-engine-capture" class="atlas-engine">{cap_body}</div>
     <div id="atlas-engine-bundle" class="atlas-engine">{bun_body}</div>
     {scripts}
-    <script src="/atlas/atlas-shell.js"></script>
-    <script src="/atlas/atlas-workspace.js"></script>
+    <script src="{_asset('atlas-shell.js')}"></script>
+    <script src="{_asset('atlas-workspace.js')}"></script>
 </body>
 </html>
 """

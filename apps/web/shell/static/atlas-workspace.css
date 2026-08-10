@@ -61,10 +61,88 @@ body.atlas-workspace {
     white-space: nowrap;
 }
 
+/* One shape for every rail entry, whichever engine it came from.
+ *
+ * The capture engine styles .nav-item for a 78px icon-only strip - column
+ * layout, centred, 11px - so it is overridden here to match the rest. */
+.atlas-rail .nav-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    font-size: 0.87rem;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
+    text-align: left;
+    border: 0;
+    border-left: 3px solid transparent;
+    border-radius: 0 var(--atlas-radius-sm) var(--atlas-radius-sm) 0;
+    background: none;
+    color: var(--atlas-text-muted);
+    cursor: pointer;
+}
+
+.atlas-rail .nav-item svg,
+.atlas-rail .nav-item .nav-ico,
 .atlas-rail .atlas-rail-item svg {
     width: 17px;
     height: 17px;
     flex: none;
+}
+
+.atlas-rail .nav-item span {
+    font-size: inherit;
+}
+
+/* The capture engine pins its Learn entry to the bottom of its own sidebar with
+ * an auto top margin. In a rail that continues with another group below, that
+ * pushes it hundreds of pixels away from the list it belongs to. */
+.atlas-rail .nav-item.nav-learn {
+    margin-top: 0;
+}
+
+/* Module proxies. The real radios stay inside the bundle engine's form - moving
+ * them out would drop their value from the submission - so these drive them.
+ * They carry no icon, and a marker keeps their labels on the same optical
+ * column as the entries that do. */
+.atlas-module-item::before {
+    content: "";
+    width: 17px;
+    flex: none;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.35;
+    transform: scaleX(0.45);
+}
+
+.atlas-module-item.is-selected {
+    background: var(--atlas-accent-soft);
+    border-left-color: var(--atlas-accent);
+    color: var(--atlas-text-strong);
+    font-weight: 600;
+}
+
+.atlas-module-item.is-selected::before {
+    opacity: 1;
+    background: var(--atlas-accent);
+}
+
+.atlas-rail .nav-item:hover {
+    background: var(--atlas-surface-soft);
+    color: var(--atlas-text);
+}
+
+.atlas-rail .nav-item.is-active,
+.atlas-rail .nav-item.active {
+    background: var(--atlas-accent-soft);
+    border-left-color: var(--atlas-accent);
+    color: var(--atlas-text-strong);
+    font-weight: 600;
 }
 
 .atlas-rail-item:hover {

@@ -176,19 +176,47 @@
         }
 
         rail.appendChild(el("div", "atlas-rail-title", "Endpoint bundle"));
-        var bundleBtn = el("button", "atlas-rail-item", "Bundle analysis");
+        var bundleBtn = el("button", "atlas-rail-item");
         bundleBtn.type = "button";
+        // Icon first so this entry sits on the same optical column as the
+        // capture views, which all carry one.
+        var bundleIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        bundleIcon.setAttribute("viewBox", "0 0 24 24");
+        bundleIcon.setAttribute("fill", "none");
+        bundleIcon.setAttribute("stroke", "currentColor");
+        bundleIcon.setAttribute("stroke-width", "1.6");
+        bundleIcon.setAttribute("stroke-linecap", "round");
+        bundleIcon.setAttribute("stroke-linejoin", "round");
+        bundleIcon.innerHTML = '<path d="M21 8v8a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z"/>'
+            + '<path d="M3.3 7L12 12l8.7-5"/><path d="M12 22V12"/>';
+        bundleBtn.appendChild(bundleIcon);
+        bundleBtn.appendChild(el("span", null, "Bundle analysis"));
         bundleBtn.addEventListener("click", function () { showEngine(BUNDLE); });
         rail.appendChild(bundleBtn);
 
-        // The module choice (ZTA, VPN, Umbrella, UZTNA, EDLP) lives in the
-        // bundle engine's own rail, which the workspace hides. Without it there
-        // is no way to start an analysis at all, so it moves here.
-        var modules = scoped(BUNDLE, "#moduleSelectionWrap");
-        if (modules) {
-            modules.classList.add("atlas-rail-modules");
-            modules.addEventListener("change", function () { showEngine(BUNDLE); });
-            rail.appendChild(modules);
+        // The module choice (ZTA, VPN, Umbrella, UZTNA, EDLP) lives inside the
+        // bundle engine's <form>, and its radios must stay there or their value
+        // is never submitted. So the rail gets proxies that drive the real
+        // controls, exactly as the DART evidence tile does for the file input.
+        var realModules = scoped(BUNDLE, "#moduleSelectionWrap");
+        if (realModules) {
+            Array.prototype.slice.call(
+                realModules.querySelectorAll("input[name=module]")
+            ).forEach(function (radio) {
+                var source = realModules.querySelector('label[for="' + radio.id + '"]');
+                var item = el("button", "atlas-rail-item atlas-module-item",
+                    (source ? source.textContent : radio.value).trim());
+                item.type = "button";
+                item.dataset.module = radio.value;
+                item.addEventListener("click", function () {
+                    radio.checked = true;
+                    radio.dispatchEvent(new Event("change", { bubbles: true }));
+                    showEngine(BUNDLE);
+                    syncModuleSelection();
+                });
+                rail.appendChild(item);
+            });
+            realModules.addEventListener("change", syncModuleSelection);
         }
 
         rail.addEventListener("click", function (e) {
@@ -196,6 +224,21 @@
             if (item) markActive(item);
         });
         return rail;
+    }
+
+    /* Keep the rail proxies showing whichever module the form actually holds. */
+    function syncModuleSelection() {
+        var checked = document.querySelector(
+            "#" + BUNDLE + " input[name=module]:checked"
+        );
+        Array.prototype.forEach.call(
+            document.querySelectorAll(".atlas-module-item"),
+            function (item) {
+                item.classList.toggle(
+                    "is-selected", !!checked && item.dataset.module === checked.value
+                );
+            }
+        );
     }
 
     /* ---------------------------------------------------------------------- */

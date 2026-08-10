@@ -1,0 +1,44 @@
+[project]
+name = "atlas-workspace"
+version = "0.1.0"
+description = "Project ATLAS — unified Cisco endpoint and network diagnostics"
+requires-python = ">=3.11"
+
+# Engines are separate installable packages under packages/. This file exists to
+# hold the settings that must be identical everywhere: one linter, one formatter,
+# one Python target. Divergent tool config was one of the two platforms' gaps.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    ".venv",
+    "tools/field-scripts",
+    # DartHawk is 8801 lines in one module. It is linted for errors only until
+    # it is split behind golden tests (Phase 5); style churn on it now would
+    # bury the diff that matters.
+    "packages/darthawk/darthawk.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S"]
+ignore = [
+    "E501",   # line length is enforced by the formatter
+    "B008",   # FastAPI dependency injection uses calls in defaults by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert is the point of a test
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+    "packages/capture_inspector",
+    "packages/darthawk",
+    "packages/atlas_core",
+    "apps",
+]
+markers = [
+    "golden: compares engine output against a committed reference; needs fixtures",
+    "integration: exercises the unified shell over HTTP",
+]

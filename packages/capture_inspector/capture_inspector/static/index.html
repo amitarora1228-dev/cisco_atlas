@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ATLAS — Cisco endpoint and network diagnostics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/atlas/atlas-tokens.css" />
+  <link rel="stylesheet" href="/atlas/atlas-shell.css" />
+  <link rel="stylesheet" href="/static/style.css?v=20260651" />
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-left">
+    <img class="cisco-logo-img" src="/static/cisco-logo.svg" alt="Cisco" />
+    <span class="topbar-product">ATLAS</span>
+  </div>
+  <div class="topbar-right">
+    <span id="tshark-status" class="pill pill-muted">checking engine…</span>
+    <span class="topbar-icon" id="help-btn" title="About / quick help">?</span>
+    <span class="topbar-icon avatar" title="ATLAS">JM</span>
+  </div>
+</div>
+
+<!-- Quick help popover -->
+<div id="help-pop" class="help-pop hidden">
+  <h4>ATLAS — quick help</h4>
+  <ul>
+    <li><b>Inspect</b> — upload a PCAP/PCAPNG and/or HAR, then Analyze.</li>
+    <li><b>Flows</b> — jump to every connection found in the capture.</li>
+    <li><b>Certs</b> — show only flows where a certificate / decryption posture was observed.</li>
+    <li><b>Report</b> — jump to the full text report (also downloadable).</li>
+  </ul>
+  <p class="muted">Badges: <span class="badge badge-decrypted">Decrypted</span> re-signed by SWG CA ·
+  <span class="badge badge-passthrough">Pass-through</span> real public CA ·
+  <span class="badge badge-encrypted">TLS 1.3</span> cert encrypted ·
+  <span class="badge badge-tunnel">Tunnel</span> opaque CONNECT.</p>
+  <p class="muted">Runs 100% locally. No data leaves this machine.</p>
+</div>
+
+<!-- TLS key log how-to modal -->
+<div id="keylog-help" class="kh-overlay hidden">
+  <div class="kh-modal" role="dialog" aria-modal="true" aria-labelledby="kh-title">
+    <div class="kh-head">
+      <h3 id="kh-title">Generate a TLS key log (SSLKEYLOGFILE)</h3>
+      <button type="button" id="kh-close" class="kh-close" title="Close">&times;</button>
+    </div>
+    <p class="kh-intro">
+      Chrome, Edge, Brave and Firefox can write their TLS session keys to a file when the
+      <code>SSLKEYLOGFILE</code> environment variable is set. That file lets this tool (and Wireshark)
+      decrypt TLS 1.3 — revealing the real certificate and the inner HTTP behind an SWG/proxy.
+      Set the variable, launch the browser <b>from the same shell</b>, reproduce the issue, then upload the file.
+    </p>
+
+    <div class="kh-tabs" role="tablist">
+      <button type="button" class="kh-tab active" data-os="win" role="tab">Windows</button>
+      <button type="button" class="kh-tab" data-os="mac" role="tab">macOS</button>
+      <button type="button" class="kh-tab" data-os="linux" role="tab">Linux</button>
+    </div>
+
+    <!-- Windows -->
+    <div class="kh-panel" data-os="win">
+      <ol class="kh-steps">
+        <li><b>Close the browser completely.</b> Quit every window; confirm no <code>chrome.exe</code> / <code>msedge.exe</code> is left running (Task Manager → Details). A background process will ignore the variable.</li>
+        <li><b>Open PowerShell</b> and set the variable for this session:
+          <pre class="kh-code">$env:SSLKEYLOGFILE="$env:USERPROFILE\Downloads\sslkeys.log"</pre></li>
+        <li><b>Launch the browser from that same PowerShell window</b> (so it inherits the variable):
+          <pre class="kh-code"># Chrome
+&amp; "C:\Program Files\Google\Chrome\Application\chrome.exe"
+# Edge
+&amp; "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"</pre></li>
+        <li><b>Reproduce the problem</b> in that browser (visit the site, trigger the error).</li>
+        <li><b>Capture in Wireshark</b> at the same time if you need the PCAP too. Then <b>upload</b> <code>Downloads\sslkeys.log</code> here alongside the capture.</li>
+      </ol>
+      <p class="kh-tip"><b>Make it persistent (optional):</b>
+        <pre class="kh-code">[Environment]::SetEnvironmentVariable("SSLKEYLOGFILE","$env:USERPROFILE\Downloads\sslkeys.log","User")</pre>
+        Then sign out and back in so all apps pick it up.</p>
+    </div>
+
+    <!-- macOS -->
+    <div class="kh-panel hidden" data-os="mac">
+      <ol class="kh-steps">
+        <li><b>Quit the browser completely</b> (Cmd+Q — not just the window).</li>
+        <li><b>Open Terminal</b> and export the variable:
+          <pre class="kh-code">export SSLKEYLOGFILE="$HOME/Downloads/sslkeys.log"</pre></li>
+        <li><b>Launch the browser binary directly from that Terminal</b> (using <code>open</code> may not pass the variable, so call the executable):
+          <pre class="kh-code"># Chrome
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Edge
+"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+# Firefox
+"/Applications/Firefox.app/Contents/MacOS/firefox"</pre></li>
+        <li><b>Reproduce the problem</b> in that browser.</li>
+        <li><b>Upload</b> <code>~/Downloads/sslkeys.log</code> here (with the PCAP if you captured one).</li>
+      </ol>
+      <p class="kh-tip"><b>Make it persistent (optional):</b> add the <code>export</code> line to <code>~/.zshrc</code>, then <code>source ~/.zshrc</code> and relaunch the browser from a new Terminal.</p>
+    </div>
+
+    <!-- Linux -->
+    <div class="kh-panel hidden" data-os="linux">
+      <ol class="kh-steps">
+        <li><b>Close the browser completely</b> (quit all windows and background processes).</li>
+        <li><b>Open a terminal</b> and export the variable:
+          <pre class="kh-code">export SSLKEYLOGFILE="$HOME/sslkeys.log"</pre></li>
+        <li><b>Launch the browser from that same terminal:</b>
+          <pre class="kh-code">google-chrome     # or: chromium
+microsoft-edge    # Edge
+firefox           # Firefox</pre></li>
+        <li><b>Reproduce the problem</b> in that browser.</li>
+        <li><b>Upload</b> <code>~/sslkeys.log</code> here (with the PCAP if you captured one).</li>
+      </ol>
+      <p class="kh-tip"><b>Make it persistent (optional):</b> add the <code>export</code> line to <code>~/.bashrc</code> (or <code>~/.profile</code>), then open a new terminal and relaunch the browser.</p>
+    </div>
+
+    <p class="kh-warn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
+      <span>The key log can decrypt <b>everything</b> that browser did while it was set (banking, email, work apps). Treat it as a secret, keep it local, and delete it after analysis. Unset the variable / relaunch normally when you are done.</span>
+    </p>
+  </div>
+</div>
+
+<!-- Shell: sidebar + content -->
+<div class="shell">
+  <nav class="sidebar">
+    <a class="nav-item active" id="nav-inspect" title="Provide evidence &amp; analyze">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+      <span>Inspect</span></a>
+    <a class="nav-item" id="nav-flows" title="All flows &amp; events">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 7 4-14 3 7h4"/></svg>
+      <span>Flows</span></a>
+    <a class="nav-item" id="nav-hosts" title="Host inventory — every destination the client talked to">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="15" width="18" height="5" rx="1"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
+      <span>Hosts</span></a>
+    <a class="nav-item" id="nav-certs" title="Flows with certificate / decryption info">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><path d="M9 13.5L7.5 21l4.5-2.2L16.5 21 15 13.5"/></svg>
+      <span>Certs</span></a>
+    <a class="nav-item" id="nav-dns" title="DNS resolutions, block pages &amp; issues">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg>
+      <span>DNS</span></a>
+    <a class="nav-item" id="nav-report" title="Full text report">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6M9 9h2"/></svg>
+      <span>Report</span></a>
+    <a class="nav-item nav-learn" id="nav-learn" title="Network analysis concepts — learn how to read a capture">
+      <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2z"/><path d="M20 5a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2z"/></svg>
+      <span>Learn</span></a>
+  </nav>
+
+  <main class="content">
+    <div class="page-head">
+      <h1>ATLAS</h1>
+      <p class="page-sub">Unified Cisco endpoint and network diagnostics. Analyze a <strong>packet capture</strong> (PCAP/PCAPNG), a <strong>browser HAR log</strong> and a <strong>Cisco DART bundle</strong> together — TLS decryption, certificates, DNS, proxy/SWG and SASE behavior on the wire, alongside ZTA, VPN, Umbrella, UZTNA and EDLP diagnostics from the endpoint itself.</p>
+      <button type="button" class="learn-cta" id="learn-cta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+        New to traffic analysis? Open the network-analysis guide
+      </button>
+    </div>
+
+    <!-- Learn: network-analysis concepts -->
+    <section class="card learn hidden" id="sec-learn">
+      <div class="card-head learn-head">
+        <h2>Network-analysis guide</h2>
+        <span class="muted">Short, plain-language explanations of what this tool shows you. No prior packet-capture experience needed.</span>
+      </div>
+
+      <div class="learn-grid">
+        <details class="learn-topic" open>
+          <summary><span class="learn-ico">🔗</span> What is a “flow”?</summary>
+          <div class="learn-body">
+            <p>A <b>flow</b> is a single conversation between two endpoints — one client (your machine) talking to one server, over one port. Wireshark calls it a TCP/UDP <i>stream</i>.</p>
+            <p>Every row in <b>Flows</b> is one flow. Expanding a row shows its <b>Connection flow</b> diagram: each arrow is a packet, blue = client→server, green = server→client, top to bottom in time.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">🤝</span> The TLS handshake</summary>
+          <div class="learn-body">
+            <p>Before any encrypted data, client and server negotiate in the clear:</p>
+            <ul>
+              <li><b>SYN / SYN-ACK</b> — TCP opens the connection.</li>
+              <li><b>ClientHello</b> — client offers ciphers, TLS version &amp; the <b>SNI</b> (the hostname it wants).</li>
+              <li><b>ServerHello + Certificate</b> — server picks the cipher and presents its certificate.</li>
+              <li><b>Application Data</b> — everything after this is encrypted.</li>
+            </ul>
+            <p>The tool reads this metadata to tell whether traffic was decrypted, passed through, or fully hidden.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">🛡️</span> Decryption posture (the badges)</summary>
+          <div class="learn-body">
+            <p>How the proxy/SWG treated each TLS flow:</p>
+            <p class="learn-badges">
+              <span class="badge badge-decrypted">Decrypted</span> — the certificate was <b>re-signed by your SWG’s CA</b>. The proxy opened, inspected and re-encrypted the traffic.<br/>
+              <span class="badge badge-passthrough">Pass-through</span> — a <b>real public CA</b> certificate. The proxy let it pass uninspected.<br/>
+              <span class="badge badge-encrypted">TLS 1.3</span> — the certificate itself is encrypted, so it can’t be read from the capture alone.<br/>
+              <span class="badge badge-tunnel">Tunnel</span> — an opaque <code>CONNECT</code> tunnel; only endpoints are visible.
+            </p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">🏷️</span> SNI, certificates &amp; CA re-signing</summary>
+          <div class="learn-body">
+            <p><b>SNI</b> (Server Name Indication) is the hostname the client asks for inside the ClientHello — it’s how the tool names a flow even when traffic is encrypted.</p>
+            <p>A <b>certificate</b> proves the server’s identity and is signed by a <b>CA</b> (Certificate Authority). When a SWG decrypts, it swaps the real certificate for one it signs with its <b>own CA</b> — that swap is exactly what the <span class="badge badge-decrypted">Decrypted</span> badge detects.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">🧬</span> JA3 / JA3S fingerprints</summary>
+          <div class="learn-body">
+            <p><b>JA3</b> is a fingerprint of the client’s ClientHello; <b>JA3S</b> fingerprints the server’s ServerHello. They work even on TLS 1.3 because they use clear-text handshake fields.</p>
+            <p>Many different destinations sharing one <b>JA3S</b> often means a single TLS terminator — i.e. a proxy is decrypting everything behind it.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">🌐</span> DNS: resolution &amp; block pages</summary>
+          <div class="learn-body">
+            <p>DNS turns a name (<code>teams.microsoft.com</code>) into an IP. A name often points to a <b>CNAME</b> chain before landing on an address — the <b>DNS</b> tab and each flow show that chain plus which <b>resolver</b> answered.</p>
+            <p>If Secure Access <b>blocks</b> a domain, DNS may return a block-page IP instead of the real one — the tool flags those so a “failure” isn’t mistaken for a network fault.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">⚡</span> QUIC / HTTP-3</summary>
+          <div class="learn-body">
+            <p><b>QUIC</b> is HTTP-3 over UDP/443. Secure Access does <b>not</b> intercept QUIC — it passes uninspected. That’s why QUIC gets its own channel color: if you expect inspection, the client should be steered to fall back to TCP/TLS.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">🏢</span> Proxy / SWG / SASE / Secure Access</summary>
+          <div class="learn-body">
+            <p>A <b>SWG</b> (Secure Web Gateway) sits between the user and the internet to enforce policy. <b>SASE</b> delivers that from the cloud. <b>Cisco Secure Access</b> is Cisco’s SASE — it can decrypt, inspect and block traffic. This tool’s job is to show, from a capture, <i>what it actually did</i>.</p>
+          </div>
+        </details>
+
+        <details class="learn-topic">
+          <summary><span class="learn-ico">📊</span> Reading severity &amp; the sequence diagram</summary>
+          <div class="learn-body">
+            <p><b>Severity</b> highlights flows worth attention (resets, TLS alerts, failed handshakes). “Show only problems” filters to those.</p>
+            <p>In a flow’s <b>Connection flow</b> diagram, each arrow’s bright end is where the packet <b>arrives</b>; the faint end is where it <b>left</b>. Red arrows mark anomalies like <code>RST</code> or TLS alerts.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="card" id="sec-evidence">
+      <div class="card-head"><h2>1 · Provide evidence</h2></div>
+      <div class="drops">
+        <label class="drop" id="drop-pcap">
+          <input type="file" id="pcap" accept=".pcap,.pcapng,.cap" hidden />
+          <div class="drop-inner">
+            <span class="drop-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
+            <strong>PCAP / PCAPNG</strong>
+            <span class="hint">Wireshark capture — full TLS/cert/alert analysis</span>
+            <span class="filename" id="pcap-name">no file selected</span>
+          </div>
+        </label>
+        <label class="drop" id="drop-har">
+          <input type="file" id="har" accept=".har,.json" hidden />
+          <div class="drop-inner">
+            <span class="drop-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13h6M9 17h4"/></svg></span>
+            <strong>HAR log</strong>
+            <span class="hint">Browser export — errors, status codes, timings</span>
+            <span class="filename" id="har-name">no file selected</span>
+          </div>
+        </label>
+        <label class="drop" id="drop-keylog">
+          <input type="file" id="keylog" accept=".keys,.log,.txt,.key" hidden />
+          <div class="drop-inner">
+            <span class="drop-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2"/></svg></span>
+            <strong>TLS key log <span class="opt-tag">optional</span></strong>
+            <span class="hint">SSLKEYLOGFILE — decrypts TLS 1.3 (reveals real cert &amp; inner HTTP)</span>
+            <span class="filename" id="keylog-name">no file selected</span>
+          </div>
+        </label>
+      </div>
+      <button type="button" id="keylog-help-btn" class="keylog-help-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><circle cx="12" cy="16.5" r="0.6" fill="currentColor" stroke="none"/></svg>
+        How do I generate a TLS key log? <span class="muted">(Windows · macOS · Linux — step by step)</span>
+      </button>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>2 · Optional context <span class="muted">(improves accuracy)</span></h2></div>
+      <div class="grid">
+        <label>Affected domain / SNI<input id="domain" placeholder="e.g. login.example.com" /></label>
+        <label>Source IP<input id="src_ip" placeholder="client IP" /></label>
+        <label>Destination IP<input id="dst_ip" placeholder="server/VIP IP" /></label>
+        <label>Decryption policy<input id="policy" placeholder="decrypt / bypass / selective" /></label>
+        <label>Approx. timestamp<input id="timestamp" placeholder="2026-06-18 14:32" /></label>
+        <label class="wide">Expected behavior<input id="expected" placeholder="loads when bypassed" /></label>
+        <label class="wide">Actual behavior<input id="actual" placeholder="fails when decrypted" /></label>
+      </div>
+      <label class="switch resolve-switch">
+        <input type="checkbox" id="resolve-certs" />
+        <span>Live certificate lookup <span class="muted">— for TLS 1.3 flows where the cert is hidden, connect to each host <b>now</b> and read the certificate it currently serves. Shown separately as a 🌐 live lookup — it is <b>not</b> capture evidence and may differ from the cert actually used. Makes outbound connections from this machine.</span></span>
+      </label>
+      <label class="switch resolve-switch">
+        <input type="checkbox" id="sa-mode" />
+        <span>Analyze as Cisco Secure Access <span class="muted">— by default the analysis is <b>vendor-agnostic</b>. Turn this on to enable Secure Access-specific intelligence: ingress/egress region checks, roaming/steering, Private Access &amp; internal-traffic detection, SWG proxy region flips and Secure Access certificate-chain recognition.</span></span>
+      </label>
+      <label class="switch resolve-switch sa-sub">
+        <input type="checkbox" id="sa-tunnel" disabled />
+        <span>This capture goes through a Secure Access tunnel <span class="muted">— check the client TCP MSS against the Secure Access tunnel baseline (MTU 1390 / MSS 1350) and warn about UDP/QUIC/DNS breakage when the effective MTU is too low.</span></span>
+      </label>
+    </section>
+
+    <section class="card actions">
+      <button id="run" class="primary">Analyze</button>
+      <button id="download" class="ghost" disabled>Download report (.txt)</button>
+      <span id="status" class="status"></span>
+      <div id="progress" class="progress hidden" role="progressbar" aria-label="Analysis progress">
+        <div id="progress-bar" class="progress-bar"></div>
+        <span id="progress-label" class="progress-label"></span>
+      </div>
+    </section>
+
+    <section id="results" class="hidden">
+      <div class="card summary" id="summary-card"></div>
+      <div class="card tech-summary" id="tech-summary-card"></div>
+      <div class="card" id="sec-flows">
+        <div class="flows-head">
+          <h2>Flows &amp; events</h2>
+          <div class="filters">
+            <label class="switch">
+              <input type="checkbox" id="only-problems" />
+              <span>Show only problems</span>
+            </label>
+            <input id="flow-filter" class="flow-filter" placeholder="filter by domain / IP…" />
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="flow-table" class="ftable">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Time</th>
+                <th>Severity</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Domain / SNI</th>
+                <th>Certificate</th>
+                <th>Protocol</th>
+                <th>TLS status</th>
+                <th>Error / Issue</th>
+              </tr>
+            </thead>
+            <tbody id="flow-body"></tbody>
+          </table>
+        </div>
+        <div id="flow-pager" class="pager hidden"></div>
+        <p id="flow-empty" class="muted hidden">No problems detected — toggle “Show only problems” off to see all healthy flows.</p>
+      </div>
+      <div class="card hidden" id="sec-hosts">
+        <div class="flows-head">
+          <h2>Host inventory</h2>
+          <div class="filters">
+            <label class="switch">
+              <input type="checkbox" id="hosts-only-problems" />
+              <span>Only hosts with issues</span>
+            </label>
+            <input id="host-filter" class="flow-filter" placeholder="filter by host / IP…" />
+          </div>
+        </div>
+        <div id="host-summary" class="dns-summary"></div>
+        <div id="host-list"></div>
+        <p id="host-empty" class="muted hidden">No hosts to show.</p>
+      </div>
+      <div class="card hidden" id="sec-dns">
+        <div class="flows-head">
+          <h2>DNS resolutions</h2>
+          <div class="filters">
+            <label class="switch">
+              <input type="checkbox" id="dns-only-flagged" />
+              <span>Only blocks &amp; issues</span>
+            </label>
+          </div>
+        </div>
+        <div id="dns-summary" class="dns-summary"></div>
+        <div class="table-wrap">
+          <table id="dns-table" class="ftable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Result</th>
+                <th>Answers</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="dns-body"></tbody>
+          </table>
+        </div>
+        <p id="dns-empty" class="muted hidden">No DNS queries were observed in this capture.</p>
+      </div>
+      <div class="card" id="sec-report">
+        <div class="card-head"><h2>Full report</h2></div>
+        <div id="report" class="report"></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>Packet capture, HAR and DART bundle analysis · powered by tshark + X.509 analysis · evidence-based, no invented data</span>
+    </footer>
+  </main>
+</div>
+
+<script src="/static/app.js?v=20260651"></script>
+<script src="/atlas/atlas-shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+# Project ATLAS - systemd unit for the Linux production host.
+#
+# ATLAS is deployed directly onto the host, not as a container. This unit is
+# where the isolation that an image would have provided has to be declared
+# instead: an unprivileged user, a read-only application tree, and a private
+# temp directory.
+#
+# That isolation is not decoration. Capture Inspector shells out to tshark, and
+# tshark parses uploaded files - hostile input by definition. It must not run as
+# root and must not be able to write to the application tree.
+#
+# Install:
+#   sudo useradd --system --home /opt/atlas --shell /usr/sbin/nologin atlas
+#   sudo mkdir -p /opt/atlas /var/lib/atlas/uploads
+#   sudo chown -R atlas:atlas /opt/atlas /var/lib/atlas
+#   # deploy the tree to /opt/atlas, then as the atlas user:
+#   #   python3 -m venv /opt/atlas/.venv
+#   #   /opt/atlas/.venv/bin/pip install -r packages/capture_inspector/requirements.txt \
+#   #       -r packages/darthawk/requirements.txt -r requirements-web.txt
+#   sudo cp deploy/atlas.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now atlas
+#
+# ATLAS binds to localhost only. Terminate TLS and authenticate in a reverse
+# proxy in front of it - uploads are packet captures and DART bundles.
+
+[Unit]
+Description=Project ATLAS - unified Cisco endpoint and network diagnostics
+Documentation=file:/opt/atlas/docs/ASSESSMENT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=atlas
+Group=atlas
+WorkingDirectory=/opt/atlas
+
+Environment=PYTHONUNBUFFERED=1
+Environment=DARTHAWK_AUTO_INSTALL=0
+Environment=PYTHONPATH=/opt/atlas/packages/capture_inspector:/opt/atlas/packages/darthawk:/opt/atlas/packages/atlas_core:/opt/atlas/apps
+
+ExecStart=/opt/atlas/.venv/bin/uvicorn web.main:app --host 127.0.0.1 --port 8000
+
+Restart=on-failure
+RestartSec=5s
+
+# Isolation the container image used to provide.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# Uploads are the only path ATLAS may write to.
+ReadWritePaths=/var/lib/atlas
+
+# A single large capture must not take the host down with it.
+MemoryMax=4G
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

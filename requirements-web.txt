@@ -1,0 +1,4 @@
+# Dependencies of the unified web shell itself, beyond what each engine needs.
+# Capture Inspector already brings FastAPI and uvicorn; this adds only the
+# adapter that lets DartHawk's Flask (WSGI) app run inside the ASGI stack.
+a2wsgi==1.10.7

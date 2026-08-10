@@ -1,42 +1,23 @@
 /* ATLAS unified workspace.
  *
- * One page, one evidence panel, both engines. A single investigation normally
- * spans a DART bundle, a packet capture and sometimes a HAR; this keeps them in
- * one session instead of one tool each.
+ * One tool, not two behind a switcher. The capture engine's "Provide evidence"
+ * step is the single entry point for every artifact - packet capture, HAR and
+ * DART bundle - and one rail carries every view both engines offer.
  *
- * The engines are not rewritten. Their markup and scripts are already loaded in
- * this document - which works because they have no element-id or global-name
- * collisions - and this file only:
- *   1. builds the shared header and rail,
- *   2. accepts every artifact type in one drop zone and hands each file to the
- *      engine that understands it, by assigning it to that engine's own input,
- *   3. shows the panel matching the selected view.
+ * Nothing is reimplemented. The workspace rearranges what already exists:
+ *   - It *moves* the engines' own nodes rather than cloning them, so their event
+ *     listeners survive and both engines behave exactly as they do standalone.
+ *   - Files are assigned to each engine's own <input type=file>, so that
+ *     engine's existing change handler, validation and analysis flow run.
  *
- * Handing files to the engines' own <input type=file> elements matters: it means
- * each engine's existing change handlers, validation and analysis flow run
- * unmodified. Nothing is reimplemented here that an engine already does.
+ * This is only safe because the two frontends were measured to be compatible:
+ * 0 element-id collisions and 0 top-level JavaScript name collisions.
  */
 (function () {
     "use strict";
 
-    var ENGINES = {
-        capture: { root: "atlas-engine-capture", label: "Traffic Capture" },
-        bundle: { root: "atlas-engine-bundle", label: "Endpoint Bundle" }
-    };
-
-    // Which engine input each artifact belongs to, chosen by file extension.
-    var ARTIFACTS = [
-        { id: "pcap", label: "Packet capture", exts: [".pcap", ".pcapng", ".cap"],
-          engine: "capture", input: "#pcap-input, input[type=file][accept*='pcap']" },
-        { id: "har", label: "HAR log", exts: [".har"],
-          engine: "capture", input: "input[type=file][accept*='har']" },
-        { id: "keylog", label: "TLS key log", exts: [".log", ".keys", ".txt"],
-          engine: "capture", input: "input[type=file][accept*='log'], input[type=file][accept*='.keys']" },
-        { id: "bundle", label: "DART bundle", exts: [".zip"],
-          engine: "bundle", input: "#dartFile" }
-    ];
-
-    var state = { loaded: {}, view: null };
+    var CAPTURE = "atlas-engine-capture";
+    var BUNDLE = "atlas-engine-bundle";
 
     function el(tag, cls, text) {
         var n = document.createElement(tag);
@@ -45,23 +26,16 @@
         return n;
     }
 
-    function artifactFor(file) {
-        var name = (file.name || "").toLowerCase();
-        for (var i = 0; i < ARTIFACTS.length; i++) {
-            var a = ARTIFACTS[i];
-            for (var j = 0; j < a.exts.length; j++) {
-                if (name.endsWith(a.exts[j])) return a;
-            }
-        }
-        return null;
+    function scoped(engine, selector) {
+        var root = document.getElementById(engine);
+        return root ? root.querySelector(selector) : null;
     }
 
-    /* Give the file to the engine's own input so its existing handlers fire. */
-    function handOff(artifact, file) {
-        var scope = document.getElementById(ENGINES[artifact.engine].root);
-        var input = scope ? scope.querySelector(artifact.input) : null;
-        if (!input) return false;
+    /* ---- evidence -------------------------------------------------------- */
 
+    /* Hand a file to an engine's own input so its existing handlers fire. */
+    function handOff(input, file) {
+        if (!input) return false;
         var dt = new DataTransfer();
         dt.items.add(file);
         input.files = dt.files;
@@ -69,143 +43,145 @@
         return true;
     }
 
-    function acceptFiles(files) {
-        Array.prototype.forEach.call(files, function (file) {
-            var artifact = artifactFor(file);
-            if (!artifact) {
-                state.loaded["_rejected_" + file.name] = {
-                    label: file.name, detail: "unsupported file type", ok: false
-                };
-            } else if (handOff(artifact, file)) {
-                state.loaded[artifact.id] = { label: artifact.label, detail: file.name, ok: true };
-            } else {
-                state.loaded[artifact.id] = {
-                    label: artifact.label, detail: "could not be loaded", ok: false
-                };
-            }
-        });
-        renderEvidence();
-    }
+    /* A DART bundle tile matching the capture engine's evidence cards. It is a
+     * proxy for the bundle engine's own #dartFile rather than a replacement:
+     * that input stays inside its form, where the engine's submit logic needs
+     * it. */
+    function buildBundleCard() {
+        var label = el("label", "drop");
+        label.id = "drop-bundle";
 
-    function renderEvidence() {
-        var list = document.getElementById("atlas-evidence-list");
-        if (!list) return;
-        list.innerHTML = "";
-        var keys = Object.keys(state.loaded);
-        if (!keys.length) {
-            list.appendChild(el("p", "atlas-evidence-empty",
-                "No evidence loaded yet. Drop a DART bundle, packet capture or HAR above."));
-            return;
-        }
-        keys.forEach(function (k) {
-            var item = state.loaded[k];
-            var row = el("div", "atlas-evidence-item" + (item.ok ? "" : " is-bad"));
-            row.appendChild(el("span", "atlas-evidence-label", item.label));
-            row.appendChild(el("span", "atlas-evidence-detail", item.detail));
-            list.appendChild(row);
-        });
-    }
-
-    function buildEvidencePanel() {
-        var panel = el("section", "atlas-evidence");
-        panel.id = "atlas-evidence";
-
-        var drop = el("div", "atlas-dropzone");
-        drop.id = "atlas-dropzone";
-        drop.appendChild(el("div", "atlas-dropzone-title", "Drop evidence here"));
-        drop.appendChild(el("div", "atlas-dropzone-hint",
-            "DART bundle (.zip) - packet capture (.pcap, .pcapng) - HAR log (.har) - TLS key log"));
-
-        var pick = el("button", "atlas-dropzone-btn", "Choose files");
-        pick.type = "button";
         var picker = document.createElement("input");
         picker.type = "file";
-        picker.multiple = true;
-        picker.className = "atlas-hidden-input";
-        pick.addEventListener("click", function () { picker.click(); });
-        picker.addEventListener("change", function () { acceptFiles(picker.files); });
-        drop.appendChild(pick);
-        drop.appendChild(picker);
+        picker.accept = ".zip";
+        picker.hidden = true;
 
-        ["dragenter", "dragover"].forEach(function (evt) {
-            drop.addEventListener(evt, function (e) {
-                e.preventDefault();
-                drop.classList.add("is-over");
-            });
-        });
-        ["dragleave", "drop"].forEach(function (evt) {
-            drop.addEventListener(evt, function (e) {
-                e.preventDefault();
-                drop.classList.remove("is-over");
-            });
-        });
-        drop.addEventListener("drop", function (e) {
-            if (e.dataTransfer && e.dataTransfer.files) acceptFiles(e.dataTransfer.files);
+        var inner = el("div", "drop-inner");
+        var icon = el("span", "drop-icon");
+        icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            + 'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+            + '<path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>'
+            + '<path d="M12 11v5"/><path d="M9.5 13.5L12 11l2.5 2.5"/></svg>';
+        var title = document.createElement("strong");
+        title.textContent = "DART bundle";
+        var hint = el("span", "hint",
+            "Cisco Secure Client diagnostics - ZTA, VPN, Umbrella, UZTNA, EDLP");
+        var name = el("span", "filename", "no file selected");
+        name.id = "bundle-name";
+
+        inner.appendChild(icon);
+        inner.appendChild(title);
+        inner.appendChild(hint);
+        inner.appendChild(name);
+        label.appendChild(picker);
+        label.appendChild(inner);
+
+        picker.addEventListener("change", function () {
+            var file = picker.files && picker.files[0];
+            if (!file) return;
+            if (handOff(scoped(BUNDLE, "#dartFile"), file)) {
+                name.textContent = file.name;
+                label.classList.add("has-file");
+            } else {
+                name.textContent = "could not be loaded";
+            }
         });
 
-        panel.appendChild(drop);
-        var list = el("div", "atlas-evidence-list");
-        list.id = "atlas-evidence-list";
-        panel.appendChild(list);
-        return panel;
+        return label;
     }
 
-    function showView(view) {
-        state.view = view;
-        Object.keys(ENGINES).forEach(function (id) {
-            var node = document.getElementById(ENGINES[id].root);
-            if (node) node.classList.toggle("is-active", id === view);
+    /* The key log stays available - it is what decrypts TLS 1.3 and reveals the
+     * real certificate inside a CONNECT tunnel - but it is no longer one of the
+     * primary artifacts. */
+    function demoteKeylog(section) {
+        var keylog = document.getElementById("drop-keylog");
+        if (!keylog || !section) return;
+
+        var advanced = el("details", "atlas-advanced");
+        var summary = document.createElement("summary");
+        summary.textContent = "Advanced: TLS key log (decrypts TLS 1.3)";
+        advanced.appendChild(summary);
+        advanced.appendChild(keylog);
+
+        var helpBtn = document.getElementById("keylog-help-btn");
+        if (helpBtn) advanced.appendChild(helpBtn);
+        section.appendChild(advanced);
+    }
+
+    function rebuildEvidence() {
+        var drops = scoped(CAPTURE, ".drops");
+        if (!drops) return;
+        demoteKeylog(scoped(CAPTURE, "#sec-evidence"));
+        drops.appendChild(buildBundleCard());
+    }
+
+    /* ---- navigation ------------------------------------------------------ */
+
+    function showEngine(which) {
+        [CAPTURE, BUNDLE].forEach(function (id) {
+            var node = document.getElementById(id);
+            if (node) node.classList.toggle("is-active", id === which);
         });
-        var evidence = document.getElementById("atlas-evidence");
-        if (evidence) evidence.classList.toggle("is-hidden", view !== "evidence");
+    }
+
+    function markActive(item) {
         Array.prototype.forEach.call(
-            document.querySelectorAll(".atlas-rail-item"),
-            function (b) { b.classList.toggle("is-active", b.dataset.view === view); }
+            document.querySelectorAll(".atlas-rail .atlas-rail-item"),
+            function (n) { n.classList.remove("is-active"); }
         );
+        item.classList.add("is-active");
     }
 
     function buildRail() {
         var rail = el("nav", "atlas-rail");
         rail.setAttribute("aria-label", "Workspace");
 
-        var groups = [
-            { title: "Workspace", items: [{ view: "evidence", label: "Evidence" }] },
-            { title: "Analysis", items: [
-                { view: "capture", label: "Traffic Capture" },
-                { view: "bundle", label: "Endpoint Bundle" }
-            ] }
-        ];
+        rail.appendChild(el("div", "atlas-rail-title", "Traffic capture"));
+        var captureNav = scoped(CAPTURE, ".sidebar");
+        if (captureNav) {
+            // Moved, not rebuilt: each item keeps the handler that drives the
+            // capture engine's own view switching.
+            Array.prototype.slice.call(captureNav.querySelectorAll(".nav-item")).forEach(
+                function (item) {
+                    item.classList.add("atlas-rail-item");
+                    item.addEventListener("click", function () { showEngine(CAPTURE); });
+                    rail.appendChild(item);
+                }
+            );
+        }
 
-        groups.forEach(function (group) {
-            rail.appendChild(el("div", "atlas-rail-title", group.title));
-            group.items.forEach(function (item) {
-                var btn = el("button", "atlas-rail-item", item.label);
-                btn.type = "button";
-                btn.dataset.view = item.view;
-                btn.addEventListener("click", function () { showView(item.view); });
-                rail.appendChild(btn);
-            });
+        rail.appendChild(el("div", "atlas-rail-title", "Endpoint bundle"));
+        var bundleBtn = el("button", "atlas-rail-item", "Bundle analysis");
+        bundleBtn.type = "button";
+        bundleBtn.addEventListener("click", function () { showEngine(BUNDLE); });
+        rail.appendChild(bundleBtn);
+
+        rail.addEventListener("click", function (e) {
+            var item = e.target.closest(".atlas-rail-item");
+            if (item) markActive(item);
         });
         return rail;
     }
 
+    /* ---------------------------------------------------------------------- */
+
     function init() {
+        rebuildEvidence();
+
         var layout = el("div", "atlas-layout");
         layout.appendChild(buildRail());
 
         var main = el("main", "atlas-main");
-        main.appendChild(buildEvidencePanel());
-
-        Object.keys(ENGINES).forEach(function (id) {
-            var node = document.getElementById(ENGINES[id].root);
+        [CAPTURE, BUNDLE].forEach(function (id) {
+            var node = document.getElementById(id);
             if (node) main.appendChild(node);
         });
-
         layout.appendChild(main);
         document.body.appendChild(layout);
 
-        renderEvidence();
-        showView("evidence");
+        showEngine(CAPTURE);
+        var first = document.querySelector(".atlas-rail .atlas-rail-item");
+        if (first) markActive(first);
     }
 
     if (document.readyState === "loading") {

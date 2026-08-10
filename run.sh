@@ -33,6 +33,14 @@ fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
+# python-evtx was replaced by pyevtx-rs. They install as 'Evtx' and 'evtx', which
+# collide on any case-insensitive filesystem - Windows, and macOS by default.
+# pip will not remove the old one on its own, so an existing venv needs this.
+if python -c 'import Evtx' 2>/dev/null; then
+  echo "[atlas] removing superseded python-evtx"
+  python -m pip uninstall --quiet --yes python-evtx
+fi
+
 echo "[atlas] installing pinned dependencies"
 python -m pip install --quiet --upgrade pip
 python -m pip install --quiet \

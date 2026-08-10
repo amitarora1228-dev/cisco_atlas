@@ -1,132 +1,113 @@
-# DartHawk
+# Project ATLAS
 
-DartHawk is a local Flask web tool for analyzing Cisco DART ZIP bundles.
+Unified Cisco endpoint and network diagnostics. ATLAS combines two analysis
+engines behind one web interface:
+
+| Engine | Input | Answers |
+|---|---|---|
+| **DartHawk** | Cisco DART ZIP bundle | What the endpoint is **configured** to do, and what its software reported about itself |
+| **Capture Inspector** | PCAP/PCAPNG, HAR, optional TLS key log | What the endpoint **actually did** on the wire |
+
+Separately, each answers half a question. Together they answer the one that
+matters: **does observed behaviour match declared configuration?** Neither tool
+can produce that answer alone - a capture cannot cite a configuration profile,
+and a bundle cannot observe the wire.
 
 ## Requirements
 
-- Python 3.10+
-- pip
-- Internet access for first-time package install
+- **Python 3.10+** (3.12 is what CI and production use)
+- **tshark** (Wireshark CLI) - required only for packet capture analysis.
+  Without it, DART bundle analysis still works; ATLAS reports the degraded state
+  at `/healthz` rather than failing quietly.
 
-Dependencies are listed in [requirements.txt](requirements.txt).
+ATLAS runs directly on the host. There is no container.
 
-## Run on macOS
+## Run it
 
-1. Open Terminal and go to the project folder:
-
-```bash
-cd /path/to/DartHawk
-```
-
-2. Create a virtual environment:
-
-```bash
-python3 -m venv .venv
-```
-
-3. Activate the virtual environment:
-
-```bash
-source .venv/bin/activate
-```
-
-4. Install dependencies:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-5. Run the tool:
-
-```bash
-python darthawk.py
-```
-
-6. The app opens in your browser automatically. If needed, open the URL shown in terminal.
-
-## Run on Windows (PowerShell)
-
-1. Open PowerShell and go to the project folder:
+**Windows**
 
 ```powershell
-cd C:\path\to\DartHawk
+.\run.ps1
 ```
 
-2. Create a virtual environment:
-
-```powershell
-py -m venv .venv
-```
-
-3. Activate the virtual environment:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-4. Install dependencies:
-
-```powershell
-py -m pip install -r requirements.txt
-```
-
-5. Run the tool:
-
-```powershell
-py darthawk.py
-```
-
-6. The app opens in your browser automatically. If needed, open the URL shown in terminal.
-
-## Optional startup environment variables
-
-- `DARTHAWK_HOST` (default: `127.0.0.1`)
-- `DARTHAWK_PORT` (preferred starting port, auto-fallback if busy)
-- `DARTHAWK_OPEN_BROWSER` (`1` to open browser, `0` to disable)
-
-Examples:
+**macOS / Linux**
 
 ```bash
-DARTHAWK_PORT=5050 python darthawk.py
+./run.sh
 ```
 
-```powershell
-$env:DARTHAWK_PORT="5050"; py darthawk.py
+Both scripts create the virtualenv, install pinned dependencies, check for
+tshark and start the server on <http://127.0.0.1:8000>.
+
+| Path | What |
+|---|---|
+| `/` | redirects to the bundle analyzer |
+| `/bundle/` | DartHawk - DART bundle analysis |
+| `/capture/` | Capture Inspector - packet capture analysis |
+| `/healthz` | liveness, loaded engines, tshark version, degraded features |
+
+## Layout
+
+```
+packages/
+  capture_inspector/   PCAP/HAR engine (FastAPI). Detection logic, framework-independent core
+  darthawk/            DART bundle engine (Flask). Templates and static assets travel with it
+  atlas_core/          Shared models and the cross-engine correlation layer
+apps/
+  web/                 The unified shell. Mounts both engines behind one origin
+tests/
+  unit/ integration/ golden/
+deploy/                systemd unit for the Linux production host
+tools/                 Field scripts and maintenance utilities
+docs/                  Assessment, architecture and the unification plan
 ```
 
-## Deploy (Production)
+Each engine keeps its own framework and routes. Capture Inspector is ASGI and is
+mounted natively; DartHawk is WSGI and is mounted through an adapter. This is
+deliberate - it lets the two unify in stages instead of requiring a rewrite, so
+neither engine's validated detection logic has to be re-derived.
 
-This repo now includes deployment-ready files:
+## Production
 
-- `Procfile` for PaaS platforms (Render, Railway, Heroku-like)
-- `Dockerfile` + `.dockerignore` for container deployment
-- `gunicorn` in `requirements.txt`
+ATLAS is deployed onto a Linux host and supervised by systemd. See
+[`deploy/atlas.service`](deploy/atlas.service), which contains both the install
+steps and the sandboxing settings.
 
-### Option 1: PaaS (Render/Railway style)
+ATLAS binds to `127.0.0.1`. **Terminate TLS and authenticate in a reverse proxy
+in front of it.** Uploads are packet captures and DART bundles: a capture
+combined with its key log fully decrypts the session it recorded, and a bundle
+carries endpoint and organisation identifiers. Neither should be reachable
+without authentication.
 
-1. Push this repo to GitHub.
-2. Create a new Web Service from the repo.
-3. Use these settings:
-
-- Build command:
+## Development
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+ruff check . && ruff format --check .
+pytest -m "not golden"     # unit and integration
+pytest -m golden           # engine output regression
 ```
 
-- Start command:
+CI runs lint, tests, a dependency audit, a clean-machine install smoke test, and
+a launcher syntax check on Windows and macOS. It also fails the build if capture
+or key material is ever committed.
 
-```bash
-gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 darthawk:app
-```
+## Documentation
 
-### Option 2: Docker
+| Document | Contents |
+|---|---|
+| [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) | Platform comparison, unification strategy, phased plan, decisions taken |
+| [`packages/capture_inspector/docs/HANDOFF.md`](packages/capture_inspector/docs/HANDOFF.md) | Capture Inspector internals; section 11 covers the DART merge and section 12 its JSON contract |
+| [`packages/capture_inspector/docs/DETECTION.md`](packages/capture_inspector/docs/DETECTION.md) | Per-detector catalog: what each detects, how, and what it cannot see |
+| [`packages/darthawk/README.md`](packages/darthawk/README.md) | Running DartHawk standalone |
 
-Build and run locally:
+## The principle that governs both engines
 
-```bash
-docker build -t darthawk .
-docker run --rm -p 5000:5000 darthawk
-```
+> **Evidence or nothing.** A finding must cite what produced it. Where the input
+> cannot answer a question, the tool says so instead of guessing.
 
-Then open `http://127.0.0.1:5000`.
+This is enforced in code, not merely documented: confidence is capped where a
+conclusion is not provable, percentages are withheld when the populations being
+compared are not comparable, and detectors are suppressed when other evidence in
+the same input contradicts them. Preserve this. Much of the value is in what the
+tool refuses to claim.

@@ -4,8 +4,8 @@
 # whole contract: virtualenv, pinned dependencies, PYTHONPATH for the package
 # layout, and the tshark preflight.
 #
-#   .\run.ps1                  start on 127.0.0.1:8000
-#   .\run.ps1 -Host 0.0.0.0    bind all interfaces (see the warning below)
+#   .\run.ps1                      start on 127.0.0.1:8000
+#   .\run.ps1 -BindHost 0.0.0.0    bind all interfaces (see the warning below)
 #   .\run.ps1 -Port 9000
 
 [CmdletBinding()]
@@ -44,15 +44,18 @@ Write-Host "[atlas] installing pinned dependencies"
 
 # Capture Inspector skips packet analysis silently when tshark is absent, which
 # looks identical to an empty capture. Say so here instead.
-$tshark = Get-Command tshark -ErrorAction SilentlyContinue
-if (-not $tshark) {
+# Normalise to a plain string: Get-Command yields CommandInfo, the fallback
+# yields a path, and only one of those has a .Path property.
+$tsharkPath = (Get-Command tshark -ErrorAction SilentlyContinue).Source
+if (-not $tsharkPath) {
     foreach ($candidate in @("$env:ProgramFiles\Wireshark\tshark.exe",
                              "${env:ProgramFiles(x86)}\Wireshark\tshark.exe")) {
-        if (Test-Path $candidate) { $tshark = Get-Item $candidate; break }
+        if (Test-Path $candidate) { $tsharkPath = $candidate; break }
     }
 }
-if ($tshark) {
-    Write-Host "[atlas] tshark: $((& $tshark.Path --version | Select-Object -First 1))"
+if ($tsharkPath) {
+    $tsharkVersion = & $tsharkPath --version 2>$null | Select-Object -First 1
+    Write-Host "[atlas] tshark: $tsharkVersion"
 } else {
     Write-Warning "tshark not found - packet analysis will be DISABLED."
     Write-Warning "DART bundle analysis is unaffected."

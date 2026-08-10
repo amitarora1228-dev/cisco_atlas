@@ -8,7 +8,7 @@ let flowPage = 0;        // current page in the flows table (0-based)
 const PAGE_SIZE = 100;   // max rows rendered per page (perf)
 
 // --- engine status ---
-fetch("/api/health")
+fetch(`${window.API_BASE || ""}/api/health`)
   .then((r) => r.json())
   .then((d) => {
     const el = $("tshark-status");
@@ -106,7 +106,7 @@ $("run").addEventListener("click", async () => {
   startProgress(resolving);
 
   try {
-    const res = await fetch("/api/analyze", { method: "POST", body: fd });
+    const res = await fetch(`${window.API_BASE || ""}/api/analyze`, { method: "POST", body: fd });
     const data = await res.json();
     if (!res.ok) {
       setStatus(data.error || "Analysis failed.", true);

@@ -5,7 +5,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,9 +31,20 @@ MAX_BYTES = 1024 * 1024 * 1024  # 1 GB safety cap
 
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
+def index(request: Request) -> HTMLResponse:
+    # The page ships absolute asset paths so it works when this engine is served
+    # at the origin root. Under ATLAS it is mounted at a prefix, so rewrite them
+    # and hand the prefix to the frontend for its API calls. root_path is empty
+    # when running standalone, which leaves the markup untouched.
     with open(os.path.join(_STATIC_DIR, "index.html"), encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+        html = f.read()
+    prefix = request.scope.get("root_path", "").rstrip("/")
+    if prefix:
+        html = html.replace('="/static/', f'="{prefix}/static/')
+    html = html.replace(
+        "</head>", f'<script>window.API_BASE="{prefix}";</script>\n</head>', 1
+    )
+    return HTMLResponse(html)
 
 
 @app.get("/api/health")

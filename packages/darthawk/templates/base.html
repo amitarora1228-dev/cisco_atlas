@@ -17,6 +17,11 @@
         })();
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Preflight is an unscoped global reset. ATLAS hosts this UI alongside
+        // Capture Inspector's own stylesheet, which preflight would overwrite.
+        tailwind.config = { corePlugins: { preflight: false } };
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body class="dh-app">

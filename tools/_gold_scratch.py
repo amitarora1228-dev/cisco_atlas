@@ -1,7 +1,8 @@
 """Scratch script (not a test): run current analyzer on the two new captures, dump findings + gaps."""
-import sys, time
+import time
 from collections import Counter
-from capture_inspector.analyze import analyze, AnalysisContext
+
+from capture_inspector.analyze import AnalysisContext, analyze
 
 CAPS = {
     "HOTSPOT": r"c:\Users\jmorenoc\Downloads\uploading on mobilephone hotspot  (2).pcapng",
@@ -33,7 +34,8 @@ for tag, path in CAPS.items():
     seen = set()
     for x in sorted(res.all_findings, key=lambda f: f.severity):
         key = x.title.split(":")[0]
-        if key in seen: continue
+        if key in seen:
+            continue
         seen.add(key)
         print(f"   [{x.severity}] {x.title[:110]}")
     # notes

@@ -1,5 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500;700&display=swap');
-        
+
+/* ATLAS compatibility layer.
+ *
+ * Tailwind's preflight is disabled (see templates/base.html) because it is an
+ * unscoped global reset, and ATLAS serves this UI alongside Capture Inspector's
+ * own stylesheet. This restores only the parts of preflight this markup
+ * actually depends on, scoped to the DartHawk subtree.
+ *
+ * The border declarations are not cosmetic: Tailwind's `border` utility sets a
+ * width but relies on preflight for `border-style: solid`. Without these, every
+ * bordered card in this UI renders with no border at all.
+ */
+.dh-app,
+.dh-app *,
+.dh-app *::before,
+.dh-app *::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: #e5e7eb;
+}
+
+body.dh-app {
+    margin: 0;
+}
+
         body {
             background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
             color: #e0f2fe;

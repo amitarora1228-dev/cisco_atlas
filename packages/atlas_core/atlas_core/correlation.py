@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .facts import BundleFacts, CaptureFacts
 
 
 class EvidenceSource(str, Enum):
@@ -44,7 +47,7 @@ class Evidence:
 
     source: EvidenceSource
     summary: str
-    locator: Optional[str] = None
+    locator: str | None = None
     """Where to look: a file path inside the bundle, or a capture frame/flow key."""
 
 
@@ -77,11 +80,79 @@ class CorrelatedFinding:
 class CorrelationInput:
     """Whatever is available. Either side may be missing."""
 
-    capture_result: Optional[object] = None
-    """``capture_inspector.context.AnalysisResult`` when a capture was analysed."""
+    bundle: BundleFacts | None = None
+    capture: CaptureFacts | None = None
 
-    bundle_result: Optional[dict] = None
-    """DartHawk's extracted bundle facts when a bundle was analysed."""
+
+def _identity_join(bundle: BundleFacts, capture: CaptureFacts) -> list[CorrelatedFinding]:
+    """Check that both inputs describe the same endpoint.
+
+    This runs before every other correlation, and nothing else is valid without
+    it. Correlating a bundle from one machine against a capture from another
+    produces confident nonsense: the configuration would be read from one
+    endpoint and the behaviour from a different one.
+
+    The organisation ID is the join key. Capture Inspector recovers it from the
+    roaming agent's STARTMSG, which names the bound SWG proxy with the org
+    encoded in the hostname; DartHawk reads it from the bundle's enrollment
+    records. Neither side infers it.
+    """
+    if not bundle.org_ids or not capture.org_ids:
+        # Silence is correct here. A missing org ID means the question cannot be
+        # answered, which is not the same as the two disagreeing.
+        return []
+
+    shared = set(bundle.org_ids) & set(capture.org_ids)
+    declared = [
+        Evidence(
+            source=EvidenceSource.BUNDLE,
+            summary=f"Enrollment records name organisation {', '.join(bundle.org_ids)}",
+            locator=bundle.source_name,
+        )
+    ]
+    observed = [
+        Evidence(
+            source=EvidenceSource.CAPTURE,
+            summary=(
+                f"Roaming agent is bound to {capture.swg_proxy_host}"
+                if capture.swg_proxy_host
+                else f"Traffic indicates organisation {', '.join(capture.org_ids)}"
+            ),
+            locator=capture.source_name,
+        )
+    ]
+
+    if shared:
+        return [
+            CorrelatedFinding(
+                title=f"Bundle and capture describe the same endpoint (organisation {', '.join(sorted(shared))})",
+                severity="info",
+                assertion=Assertion.PRESENCE,
+                detail=(
+                    "The organisation identified in the DART bundle matches the one "
+                    "the captured traffic was steered to, so configuration and "
+                    "behaviour can be compared directly."
+                ),
+                declared=declared,
+                observed=observed,
+            )
+        ]
+
+    return [
+        CorrelatedFinding(
+            title="Bundle and capture are from different organisations - they cannot be compared",
+            severity="high",
+            assertion=Assertion.CONTRADICTION,
+            detail=(
+                f"The bundle reports organisation {', '.join(bundle.org_ids)} while the "
+                f"capture shows traffic for {', '.join(capture.org_ids)}. Any comparison "
+                "of configuration against behaviour would be reading the two from "
+                "different endpoints, so no further correlation is attempted."
+            ),
+            declared=declared,
+            observed=observed,
+        )
+    ]
 
 
 def correlate(data: CorrelationInput) -> list[CorrelatedFinding]:
@@ -91,10 +162,15 @@ def correlate(data: CorrelationInput) -> list[CorrelatedFinding]:
     source there is nothing to contradict, and a weaker guess is not an
     acceptable substitute.
 
-    Detectors are added in Phase 4. The first target is the VPNaaS double
-    interception case, for which validated good and bad reference captures
-    already exist — see ``packages/capture_inspector/docs/HANDOFF.md`` section 8b.
+    The identity join runs first and gates everything after it. Later detectors
+    are added in Phase 4; the first target is the VPNaaS double interception
+    case, for which validated good and bad reference captures already exist -
+    see ``packages/capture_inspector/docs/HANDOFF.md`` section 8b.
     """
-    if data.capture_result is None or data.bundle_result is None:
+    if data.bundle is None or data.capture is None:
         return []
-    return []
+
+    findings = _identity_join(data.bundle, data.capture)
+    if any(f.assertion is Assertion.CONTRADICTION for f in findings):
+        return findings
+    return findings

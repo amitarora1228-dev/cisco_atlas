@@ -1,7 +1,7 @@
-"""Temp: run current analyzer on the two new captures, dump findings + gaps."""
+"""Scratch script (not a test): run current analyzer on the two new captures, dump findings + gaps."""
 import sys, time
 from collections import Counter
-from app.analyze import analyze, AnalysisContext
+from capture_inspector.analyze import analyze, AnalysisContext
 
 CAPS = {
     "HOTSPOT": r"c:\Users\jmorenoc\Downloads\uploading on mobilephone hotspot  (2).pcapng",

@@ -19,23 +19,40 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 os.environ.setdefault("DARTHAWK_AUTO_INSTALL", "0")
 
 from a2wsgi import WSGIMiddleware  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
-from fastapi.responses import RedirectResponse  # noqa: E402
-
 from capture_inspector.pcap import find_tshark  # noqa: E402
 from capture_inspector.server import app as capture_app  # noqa: E402
 from darthawk import app as darthawk_wsgi_app  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
 
 log = logging.getLogger("atlas")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Report the external dependency once, at start-up, where an operator sees it."""
+    tshark = _tshark_status()
+    if tshark["available"]:
+        log.info("tshark: %s (%s)", tshark["version"] or "unknown version", tshark["path"])
+    else:
+        log.error(
+            "tshark NOT FOUND - packet capture analysis is DISABLED. "
+            "DART bundle analysis is unaffected. Install Wireshark and restart."
+        )
+    yield
+
 
 app = FastAPI(
     title="Project ATLAS",
     description="Unified Cisco endpoint and network diagnostics.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -53,25 +70,15 @@ def _tshark_status() -> dict:
         return {"available": False, "path": None, "version": None}
     version = None
     try:
-        out = subprocess.run(
+        # path comes from find_tshark(): shutil.which or a hardcoded install
+        # location, never user input. Fixed argument list, no shell.
+        out = subprocess.run(  # noqa: S603
             [path, "--version"], capture_output=True, text=True, timeout=10
         )
         version = (out.stdout or "").splitlines()[0].strip() or None
     except (OSError, subprocess.SubprocessError, IndexError):
         pass
     return {"available": True, "path": path, "version": version}
-
-
-@app.on_event("startup")
-def _preflight() -> None:
-    tshark = _tshark_status()
-    if tshark["available"]:
-        log.info("tshark: %s (%s)", tshark["version"] or "unknown version", tshark["path"])
-    else:
-        log.error(
-            "tshark NOT FOUND - packet capture analysis is DISABLED. "
-            "DART bundle analysis is unaffected. Install Wireshark and restart."
-        )
 
 
 @app.get("/", include_in_schema=False)

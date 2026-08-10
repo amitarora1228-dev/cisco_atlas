@@ -23,6 +23,7 @@
         tailwind.config = { corePlugins: { preflight: false } };
     </script>
     <link rel="stylesheet" href="/atlas/atlas-tokens.css">
+    <link rel="stylesheet" href="/atlas/atlas-shell.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body class="dh-app">
@@ -131,5 +132,6 @@
             syncToggleLabel();
         })();
     </script>
+    <script src="/atlas/atlas-shell.js"></script>
 </body>
 </html>

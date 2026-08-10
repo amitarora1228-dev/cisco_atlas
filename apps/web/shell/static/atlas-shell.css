@@ -1,0 +1,172 @@
+/* ATLAS shell chrome - one header across both engines.
+ *
+ * The shell does not replace either engine's controls, it adopts them. Its JS
+ * moves existing nodes (tshark status, help, Read Me, Feedback, theme) into the
+ * header rather than rebuilding them, so their event handlers survive and no
+ * capability is lost. These rules only style the result.
+ *
+ * The header occupies the same 52px slot Capture Inspector's .topbar used, so
+ * that engine's fixed sidebar and content offsets remain correct.
+ */
+
+.atlas-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--atlas-header-h);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding: 0 16px;
+    background: var(--atlas-chrome-grad);
+    color: var(--atlas-text-inverse);
+    font-family: var(--atlas-font);
+    box-shadow: var(--atlas-shadow);
+}
+
+.atlas-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+}
+
+.atlas-brand-logo {
+    height: 20px;
+    width: auto;
+    display: block;
+}
+
+.atlas-brand-name {
+    font-size: 1.02rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+/* Module switcher - the single affordance that makes this one product */
+.atlas-modules {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    height: 100%;
+    flex: 1;
+    min-width: 0;
+}
+
+.atlas-module {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 15px;
+    text-decoration: none;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.86rem;
+    font-weight: 500;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.atlas-module:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.atlas-module.is-active {
+    color: #fff;
+    border-bottom-color: var(--atlas-accent);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.atlas-module-icon {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    opacity: 0.85;
+}
+
+/* Adopted controls. Each engine styled these for its own chrome; inside the
+ * header they need one consistent treatment. */
+.atlas-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-left: auto;
+}
+
+.atlas-actions .top-toolbar-btn,
+.atlas-actions .topbar-icon {
+    background: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #fff;
+    border-radius: var(--atlas-radius-sm);
+    padding: 5px 11px;
+    font-size: 0.76rem;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    white-space: nowrap;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.atlas-actions .top-toolbar-btn:hover,
+.atlas-actions .topbar-icon:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.atlas-actions .topbar-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 26px;
+    padding: 0;
+}
+
+.atlas-actions .topbar-icon.avatar {
+    background: var(--atlas-accent);
+    border-color: transparent;
+    font-weight: 700;
+    font-size: 0.72rem;
+}
+
+.atlas-actions .pill {
+    font-size: 0.72rem;
+    padding: 4px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+/* Engine chrome the shell has taken over. Emptied, not removed: their JS may
+ * still reference the containers. */
+body.atlas-shell .topbar,
+body.atlas-shell .top-toolbar {
+    display: none !important;
+}
+
+/* DartHawk's grid starts at the viewport top and has no offset of its own. */
+body.atlas-shell .dh-shell {
+    padding-top: var(--atlas-header-h);
+}
+
+@media (max-width: 860px) {
+    .atlas-brand-name {
+        display: none;
+    }
+
+    /* The module labels are the only thing identifying these links - there is
+       no icon to fall back on - so they shrink rather than disappear. */
+    .atlas-module {
+        padding: 0 10px;
+        font-size: 0.8rem;
+    }
+
+    .atlas-header {
+        gap: 12px;
+    }
+}

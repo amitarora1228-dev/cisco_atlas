@@ -23,13 +23,21 @@ _WINDOWS_CANDIDATES = [
     r"C:\Program Files (x86)\Wireshark\tshark.exe",
 ]
 
+# The Homebrew cask installs the GUI and leaves tshark inside the app bundle,
+# off PATH, which would otherwise look identical to Wireshark not being present.
+_MACOS_CANDIDATES = [
+    "/opt/homebrew/bin/tshark",
+    "/usr/local/bin/tshark",
+    "/Applications/Wireshark.app/Contents/MacOS/tshark",
+]
+
 
 def find_tshark() -> Optional[str]:
     """Locate the tshark executable, preferring PATH then known install dirs."""
     found = shutil.which("tshark")
     if found:
         return found
-    for candidate in _WINDOWS_CANDIDATES:
+    for candidate in _WINDOWS_CANDIDATES + _MACOS_CANDIDATES:
         if os.path.isfile(candidate):
             return candidate
     return None

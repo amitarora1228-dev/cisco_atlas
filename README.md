@@ -29,20 +29,80 @@ ATLAS runs directly on the host. There is no container.
 
 ## Run it
 
-**Windows**
+Both launchers own the whole contract: they create the virtualenv, install the
+pinned dependencies, check for tshark and serve on <http://127.0.0.1:8000>.
+Re-run them any time; they are idempotent.
+
+### Windows
 
 ```powershell
+winget install --id WiresharkFoundation.Wireshark   # once, for capture analysis
+git clone https://github.com/amarora2_cisco/Atlas.git
+cd Atlas
 .\run.ps1
 ```
 
-**macOS / Linux**
+If PowerShell refuses to run the script, the repository is not the problem - it
+is the machine's execution policy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+```
+
+tshark is found on PATH, or at `C:\Program Files\Wireshark\tshark.exe`, so the
+installer's defaults need no extra configuration.
+
+### macOS
 
 ```bash
+brew install wireshark        # the formula puts tshark on PATH
+git clone https://github.com/amarora2_cisco/Atlas.git
+cd Atlas
 ./run.sh
 ```
 
-Both scripts create the virtualenv, install pinned dependencies, check for
-tshark and start the server on <http://127.0.0.1:8000>.
+Use the **formula**, not `brew install --cask wireshark`. The cask installs the
+GUI and leaves tshark inside `/Applications/Wireshark.app`, off PATH. ATLAS looks
+there as a fallback, but PATH is the supported arrangement.
+
+If the script will not start, restore the executable bit - some transfers drop
+it:
+
+```bash
+chmod +x run.sh
+```
+
+Apple Silicon needs no Rust toolchain: the EVTX parser ships prebuilt arm64
+wheels.
+
+### Options
+
+The two launchers do **not** take the same syntax. PowerShell uses named
+parameters; the shell script takes the host positionally and the port from the
+environment.
+
+```powershell
+.\run.ps1 -Port 9000
+.\run.ps1 -BindHost 0.0.0.0     # exposes an unauthenticated app - LAN only
+```
+
+```bash
+ATLAS_PORT=9000 ./run.sh
+./run.sh 0.0.0.0                # exposes an unauthenticated app - LAN only
+```
+
+ATLAS has **no authentication**. Binding beyond `127.0.0.1` publishes uploaded
+captures and bundles to anyone who can reach the port.
+
+### Working on both platforms at once
+
+The repository is shared and cross-platform, with two guards in place:
+
+- `.gitattributes` pins shell scripts to LF and PowerShell to CRLF, so a script
+  authored on Windows still runs on macOS.
+- Both launchers remove `python-evtx` before installing. It was replaced by
+  `pyevtx-rs`, and the two collide on any case-insensitive filesystem - Windows,
+  and macOS by default - because they install as `Evtx` and `evtx`.
 
 | Path | What |
 |---|---|

@@ -98,7 +98,25 @@ If you are tempted to move or rewrite an engine's markup: don't. Wrap it.
 ```
 
 Both create the venv, install pinned dependencies, check for tshark and serve on
-<http://127.0.0.1:8000>.
+<http://127.0.0.1:8000>. Their argument syntax differs: `.\run.ps1 -Port 9000`
+against `ATLAS_PORT=9000 ./run.sh`, and the host is `-BindHost` against a
+positional argument. See the README for per-platform prerequisites.
+
+Three things make the tree work on both platforms; do not undo them without a
+replacement:
+
+- **`.gitattributes`** pins `*.sh` to LF. A shell script checked out with CRLF
+  dies on macOS with `bad interpreter: /usr/bin/env bash^M`.
+- **`run.sh` is mode 100755.** It was committed 100644 once, which is a
+  permission-denied on any Unix clone.
+- **Both launchers uninstall `python-evtx`** before installing. `pyevtx-rs`
+  replaced it, and the two cannot coexist on a case-insensitive filesystem -
+  Windows, and macOS by default - because they install as `Evtx` and `evtx`.
+  pip will not remove the old one just because it left `requirements.txt`.
+
+macOS needs the Wireshark **formula**, not the cask: the cask leaves tshark
+inside the app bundle and off PATH. `find_tshark()` checks the bundle path as a
+fallback, but PATH is the supported arrangement.
 
 | Path | What |
 |---|---|

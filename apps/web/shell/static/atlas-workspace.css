@@ -187,6 +187,24 @@ body.atlas-workspace {
     max-width: 460px;
 }
 
+/* Guidance the shell has to give itself, because the engine's own message would
+ * render in a panel that is not on screen. */
+.atlas-notice {
+    display: none;
+    margin-top: 14px;
+    padding: 11px 14px;
+    border: 1px solid var(--atlas-warning);
+    border-left-width: 3px;
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-warning-soft);
+    color: var(--atlas-text-strong);
+    font-size: 0.86rem;
+}
+
+.atlas-notice.is-visible {
+    display: block;
+}
+
 /* Engine panels - only the selected one is shown. */
 .atlas-engine {
     display: none;

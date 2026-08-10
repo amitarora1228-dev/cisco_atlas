@@ -104,9 +104,6 @@
             if (handOff(scoped(BUNDLE, "#dartFile"), file)) {
                 name.textContent = file.name;
                 label.classList.add("has-file");
-                // A bundle is only actionable from the bundle view, where the
-                // module choice and the analyse button are.
-                showEngine(BUNDLE);
             } else {
                 name.textContent = "could not be loaded";
             }
@@ -138,6 +135,101 @@
         if (!drops) return;
         demoteKeylog(scoped(CAPTURE, "#sec-evidence"));
         drops.appendChild(buildBundleCard());
+    }
+
+    /* ---- analysis -------------------------------------------------------- */
+
+    function loadedFiles() {
+        var has = function (sel) {
+            var n = document.querySelector(sel);
+            return !!(n && n.files && n.files.length);
+        };
+        return {
+            capture: has("#" + CAPTURE + " #pcap") || has("#" + CAPTURE + " #har"),
+            bundle: has("#" + BUNDLE + " #dartFile")
+        };
+    }
+
+    /* True when the chosen module offers check options but none is selected.
+     * Detected from the controls actually present, so a module that needs no
+     * check is not blocked by a rule hardcoded here. */
+    function needsCheckOption() {
+        var options = document.querySelectorAll(
+            "#" + BUNDLE + " input[name=spa_check_option]"
+        );
+        if (!options.length) return false;
+        var visible = Array.prototype.some.call(options, function (o) {
+            var label = document.querySelector('label[for="' + o.id + '"]');
+            return label && label.offsetParent !== null;
+        });
+        if (!visible) return false;
+        return !document.querySelector(
+            "#" + BUNDLE + " input[name=spa_check_option]:checked"
+        );
+    }
+
+    /* One Analyze button for every artifact.
+     *
+     * Each engine keeps its own analysis flow; this only decides which of them
+     * to start. The bundle engine is driven by submitting its form, which is
+     * what its own button does, so its validation and request building are
+     * untouched. */
+    function wireAnalyze() {
+        var run = document.querySelector("#" + CAPTURE + " #run");
+        if (!run) return;
+
+        run.addEventListener("click", function (event) {
+            var loaded = loadedFiles();
+
+            if (loaded.bundle) {
+                var form = scoped(BUNDLE, "#uploadForm");
+                if (form) {
+                    if (!document.querySelector("#" + BUNDLE + " input[name=module]:checked")) {
+                        // The engine needs a module before it can analyse, and
+                        // its own error would appear in a panel that is not on
+                        // screen.
+                        announce("Choose an analysis module in the left panel "
+                            + "(ZTA, VPN, Umbrella, UZTNA or EDLP) before analysing the bundle.");
+                        event.preventDefault();
+                        event.stopImmediatePropagation();
+                        return;
+                    }
+                    // Some modules also require a specific check. Those controls
+                    // only exist in the bundle panel, so send the user there
+                    // rather than letting the engine raise a native alert about
+                    // something invisible.
+                    if (needsCheckOption()) {
+                        showEngine(BUNDLE);
+                        announce("This module needs a specific check. Pick one below, "
+                            + "then press Analyze again.");
+                        event.preventDefault();
+                        event.stopImmediatePropagation();
+                        return;
+                    }
+                    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+                    showEngine(BUNDLE);
+                }
+            }
+
+            // With no capture artifact the capture engine would report a missing
+            // file, which is noise when the user only supplied a bundle.
+            if (!loaded.capture) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        }, true);
+    }
+
+    function announce(message) {
+        var note = document.getElementById("atlas-notice");
+        if (!note) {
+            note = el("div", "atlas-notice");
+            note.id = "atlas-notice";
+            var section = scoped(CAPTURE, "#sec-evidence");
+            if (section) section.appendChild(note);
+        }
+        note.textContent = message;
+        note.classList.add("is-visible");
     }
 
     /* ---- navigation ------------------------------------------------------ */
@@ -246,6 +338,7 @@
     function init() {
         installFetchShim();
         rebuildEvidence();
+        wireAnalyze();
 
         var layout = el("div", "atlas-layout");
         layout.appendChild(buildRail());

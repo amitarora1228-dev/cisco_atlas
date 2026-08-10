@@ -205,6 +205,70 @@ body.atlas-workspace {
     display: block;
 }
 
+/* Combined bundle results - one section per check the engine answered. */
+.atlas-results {
+    margin-bottom: 22px;
+}
+
+.atlas-results-title {
+    margin: 0 0 4px;
+    font-size: 1.16rem;
+    font-weight: 600;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-results-sub {
+    margin: 0 0 16px;
+    font-size: 0.85rem;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-result {
+    background: var(--atlas-surface);
+    border: 1px solid var(--atlas-border);
+    border-left: 3px solid var(--atlas-success);
+    border-radius: var(--atlas-radius-sm);
+    margin-bottom: 8px;
+}
+
+.atlas-result.is-error {
+    border-left-color: var(--atlas-text-subtle);
+}
+
+.atlas-result > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 11px 14px;
+    cursor: pointer;
+    font-size: 0.88rem;
+}
+
+.atlas-result-name {
+    font-weight: 600;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-result-state {
+    font-size: 0.78rem;
+    color: var(--atlas-text-muted);
+    white-space: nowrap;
+}
+
+.atlas-result-body {
+    margin: 0;
+    padding: 0 14px 14px;
+    font-family: var(--atlas-font-mono);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--atlas-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 460px;
+    overflow: auto;
+}
+
 /* Engine panels - only the selected one is shown. */
 .atlas-engine {
     display: none;

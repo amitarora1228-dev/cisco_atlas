@@ -16,6 +16,7 @@ module sets the variable before importing it.
 """
 from __future__ import annotations
 
+import io
 import logging
 import os
 import subprocess
@@ -29,8 +30,8 @@ from a2wsgi import WSGIMiddleware  # noqa: E402
 from capture_inspector.pcap import find_tshark  # noqa: E402
 from capture_inspector.server import app as capture_app  # noqa: E402
 from darthawk import app as darthawk_wsgi_app  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
-from fastapi.responses import HTMLResponse  # noqa: E402
+from fastapi import FastAPI, File, UploadFile  # noqa: E402
+from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from web.shell.workspace import compose  # noqa: E402
 
@@ -100,6 +101,72 @@ def healthz() -> dict:
         "tshark": tshark,
         "degraded": [] if tshark["available"] else ["capture_inspector: tshark missing"],
     }
+
+
+# Everything the bundle engine can actually answer without a user-supplied
+# target value.
+#
+# VPN, Umbrella, UZTNA and EDLP are accepted by the engine but not implemented:
+# they return only "[+] Payload received: <file>", and the route still carries
+# the placeholder "(Insert explicit log parsing logic here)". Running them costs
+# a full archive extraction each and produces nothing, so they are excluded until
+# they do something. They remain selectable manually.
+#
+# Check SIA Flow, Check TCP or UDP Flow and SRV Check each need a destination or
+# identifier from the user, so they cannot be part of a blanket run.
+_BUNDLE_MATRIX: list[tuple[str, dict]] = [
+    (f"ZTA - {check.removeprefix('Check ')}",
+     {"module": "ZTA", "zta_access_mode": "SPA", "spa_check_option": check})
+    for check in (
+        "Check Enrollment Errors",
+        "Check Configuration Sync",
+        "Check Server Connectivity Errors",
+        "Check Trusted Network Detection",
+        "Check User Pause Config",
+        "Check Inclusions or Exclusions",
+        "Check Event Viewer Logs",
+    )
+] + [("Duo Desktop", {"module": "Duo Desktop"})]
+
+
+@app.post("/atlas/api/bundle/analyze-all", include_in_schema=False)
+async def analyze_entire_bundle(file: UploadFile = File(...)) -> JSONResponse:
+    """Run every applicable bundle check from a single upload.
+
+    The bundle engine answers one module - and for ZTA one check - per request.
+    Driving that matrix from the browser would re-upload the archive once per
+    check: twelve checks against a 350 MB bundle is over 4 GB across the wire.
+    Uploading once and dispatching in-process avoids that entirely.
+
+    Each check is dispatched through the engine's own test client so its route,
+    validation and response building run exactly as they do for a normal
+    request; nothing is reimplemented here.
+    """
+    import darthawk
+
+    payload = await file.read()
+    name = file.filename or "bundle.zip"
+    results = []
+
+    for label, fields in _BUNDLE_MATRIX:
+        data = dict(fields)
+        data["file"] = (io.BytesIO(payload), name)
+        try:
+            with darthawk.app.test_client() as client:
+                response = client.post(
+                    "/analyze", data=data, content_type="multipart/form-data"
+                )
+                body = response.get_json(silent=True) or {}
+                results.append({
+                    "label": label,
+                    "ok": response.status_code == 200,
+                    "text": (body.get("details") or "").strip(),
+                    "error": body.get("error"),
+                })
+        except Exception as exc:  # noqa: BLE001 - one failing check must not lose the rest
+            results.append({"label": label, "ok": False, "text": "", "error": str(exc)})
+
+    return JSONResponse({"results": results})
 
 
 app.mount("/capture", capture_app)

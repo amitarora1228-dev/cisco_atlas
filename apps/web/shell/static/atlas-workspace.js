@@ -168,6 +168,77 @@
         );
     }
 
+    /* Everything the bundle engine can answer without asking the user for a
+     * target value.
+     *
+     * The engine is query-driven: one module per request, and for ZTA one check
+     * as well. "Analyse everything" therefore means running the matrix and
+     * collecting the answers, not one clever call.
+     *
+     * Deliberately excluded: Check SIA Flow, Check TCP or UDP Flow and SRV Check
+     * all need a destination or identifier from the user, so they cannot be part
+     * of a blanket run. They stay available by selecting the module manually.
+     */
+
+    function renderBundleResults(results) {
+        var host = document.getElementById("atlas-bundle-results");
+        if (!host) {
+            host = el("section", "atlas-results");
+            host.id = "atlas-bundle-results";
+            document.getElementById(BUNDLE).insertBefore(
+                host, document.getElementById(BUNDLE).firstChild
+            );
+        }
+        host.innerHTML = "";
+        host.appendChild(el("h2", "atlas-results-title", "Endpoint bundle - full analysis"));
+
+        var answered = results.filter(function (r) { return r.ok && r.text; });
+        host.appendChild(el("p", "atlas-results-sub",
+            answered.length + " of " + results.length + " checks returned findings. "
+            + "Checks that need a specific destination or identifier are not included; "
+            + "select the module in the left panel to run those."));
+
+        results.forEach(function (r) {
+            var box = el("details", "atlas-result" + (r.ok ? "" : " is-error"));
+            var head = document.createElement("summary");
+            head.appendChild(el("span", "atlas-result-name", r.label));
+            head.appendChild(el("span", "atlas-result-state",
+                r.ok ? (r.text ? "answered" : "nothing found") : (r.error || "not applicable")));
+            box.appendChild(head);
+            var body = el("pre", "atlas-result-body", r.text || r.error || "");
+            box.appendChild(body);
+            host.appendChild(box);
+        });
+    }
+
+    function analyzeEntireBundle() {
+        var input = scoped(BUNDLE, "#dartFile");
+        if (!input || !input.files || !input.files.length) return;
+
+        var body = new FormData();
+        body.append("file", input.files[0]);
+
+        announce("Analysing everything in the bundle. This can take a minute.");
+        showEngine(BUNDLE);
+
+        // One upload; the server runs every check in-process. Driving the matrix
+        // from here would re-send the archive once per check.
+        fetch("/atlas/api/bundle/analyze-all", { method: "POST", body: body })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                renderBundleResults(data.results || []);
+                clearNotice();
+            })
+            .catch(function (e) {
+                announce("The bundle could not be analysed: " + e);
+            });
+    }
+
+    function clearNotice() {
+        var note = document.getElementById("atlas-notice");
+        if (note) note.classList.remove("is-visible");
+    }
+
     /* One Analyze button for every artifact.
      *
      * Each engine keeps its own analysis flow; this only decides which of them
@@ -182,32 +253,20 @@
             var loaded = loadedFiles();
 
             if (loaded.bundle) {
-                var form = scoped(BUNDLE, "#uploadForm");
-                if (form) {
-                    if (!document.querySelector("#" + BUNDLE + " input[name=module]:checked")) {
-                        // The engine needs a module before it can analyse, and
-                        // its own error would appear in a panel that is not on
-                        // screen.
-                        announce("Choose an analysis module in the left panel "
-                            + "(ZTA, VPN, Umbrella, UZTNA or EDLP) before analysing the bundle.");
-                        event.preventDefault();
-                        event.stopImmediatePropagation();
-                        return;
-                    }
-                    // Some modules also require a specific check. Those controls
-                    // only exist in the bundle panel, so send the user there
-                    // rather than letting the engine raise a native alert about
-                    // something invisible.
-                    if (needsCheckOption()) {
+                // Analyse whatever the bundle contains, without making the user
+                // choose first. A module selected in the rail still narrows it
+                // to that engine's own detailed view.
+                var chosen = document.querySelector(
+                    "#" + BUNDLE + " input[name=module]:checked"
+                );
+                if (chosen && !needsCheckOption()) {
+                    var form = scoped(BUNDLE, "#uploadForm");
+                    if (form) {
+                        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
                         showEngine(BUNDLE);
-                        announce("This module needs a specific check. Pick one below, "
-                            + "then press Analyze again.");
-                        event.preventDefault();
-                        event.stopImmediatePropagation();
-                        return;
                     }
-                    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-                    showEngine(BUNDLE);
+                } else {
+                    analyzeEntireBundle();
                 }
             }
 

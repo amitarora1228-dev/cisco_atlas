@@ -30,6 +30,9 @@
     ];
 
     function activeModule() {
+        // The unified workspace holds both engines at once, so no single module
+        // is active there and the rail, not the header, does the switching.
+        if (document.body.classList.contains("atlas-workspace")) return "workspace";
         var path = window.location.pathname;
         for (var i = 0; i < MODULES.length; i++) {
             if (path.indexOf(MODULES[i].prefix) === 0) {
@@ -61,14 +64,16 @@
 
         var nav = el("nav", "atlas-modules");
         nav.setAttribute("aria-label", "Analysis modules");
-        MODULES.forEach(function (mod) {
-            var link = document.createElement("a");
-            link.className = "atlas-module" + (mod.id === active ? " is-active" : "");
-            link.href = mod.href;
-            link.appendChild(el("span", null, mod.label));
-            if (mod.id === active) link.setAttribute("aria-current", "page");
-            nav.appendChild(link);
-        });
+        if (active !== "workspace") {
+            MODULES.forEach(function (mod) {
+                var link = document.createElement("a");
+                link.className = "atlas-module" + (mod.id === active ? " is-active" : "");
+                link.href = mod.href;
+                link.appendChild(el("span", null, mod.label));
+                if (mod.id === active) link.setAttribute("aria-current", "page");
+                nav.appendChild(link);
+            });
+        }
         header.appendChild(nav);
 
         header.appendChild(el("div", "atlas-actions"));

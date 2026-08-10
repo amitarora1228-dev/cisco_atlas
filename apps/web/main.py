@@ -30,8 +30,9 @@ from capture_inspector.pcap import find_tshark  # noqa: E402
 from capture_inspector.server import app as capture_app  # noqa: E402
 from darthawk import app as darthawk_wsgi_app  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
-from fastapi.responses import RedirectResponse  # noqa: E402
+from fastapi.responses import HTMLResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from web.shell.workspace import compose  # noqa: E402
 
 log = logging.getLogger("atlas")
 
@@ -84,8 +85,9 @@ def _tshark_status() -> dict:
 
 
 @app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/bundle/")
+def root() -> HTMLResponse:
+    """The unified workspace: both engines, one page, one evidence panel."""
+    return HTMLResponse(compose())
 
 
 @app.get("/healthz", include_in_schema=False)

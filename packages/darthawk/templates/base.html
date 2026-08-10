@@ -22,6 +22,7 @@
         // Capture Inspector's own stylesheet, which preflight would overwrite.
         tailwind.config = { corePlugins: { preflight: false } };
     </script>
+    <link rel="stylesheet" href="/atlas/atlas-tokens.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body class="dh-app">

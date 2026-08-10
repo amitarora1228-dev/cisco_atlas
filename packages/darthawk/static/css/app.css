@@ -395,13 +395,16 @@ body.dh-app {
 
         /* Phase 2: light theme override layer */
         :root {
-            --surface-bg: #f4f7fb;
-            --surface-card: #ffffff;
-            --surface-soft: #eef4ff;
-            --text-main: #1f2937;
-            --text-muted: #475569;
-            --border-main: #c7d8ef;
-            --accent: #0ea5e9;
+            /* Each value defers to an ATLAS token when the shell supplies one,
+               and falls back to the original literal when this engine is served
+               standalone. */
+            --surface-bg: var(--atlas-bg, #f4f7fb);
+            --surface-card: var(--atlas-surface, #ffffff);
+            --surface-soft: var(--atlas-surface-soft, #eef4ff);
+            --text-main: var(--atlas-text, #1f2937);
+            --text-muted: var(--atlas-text-muted, #475569);
+            --border-main: var(--atlas-border, #c7d8ef);
+            --accent: var(--atlas-accent, #0ea5e9);
         }
 
         body {

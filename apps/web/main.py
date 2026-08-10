@@ -21,6 +21,7 @@ import os
 import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 os.environ.setdefault("DARTHAWK_AUTO_INSTALL", "0")
 
@@ -30,6 +31,7 @@ from capture_inspector.server import app as capture_app  # noqa: E402
 from darthawk import app as darthawk_wsgi_app  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 log = logging.getLogger("atlas")
 
@@ -100,3 +102,11 @@ def healthz() -> dict:
 
 app.mount("/capture", capture_app)
 app.mount("/bundle", WSGIMiddleware(darthawk_wsgi_app))
+
+# Shared design tokens, served at the origin root so both engines can link the
+# same file regardless of the prefix they are mounted under.
+app.mount(
+    "/atlas",
+    StaticFiles(directory=str(Path(__file__).parent / "shell" / "static")),
+    name="atlas-shell",
+)

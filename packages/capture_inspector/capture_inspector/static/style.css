@@ -1,34 +1,36 @@
 :root {
-  /* Cisco Secure Access — Magnetic light theme (magnetic-blue-light tokens) */
-  --bg: #f7f7f7;
-  --panel: #ffffff;
-  --panel-2: #f7f7f7;
-  --border: #e1e4e8;
-  --border-2: #d0d4d9;
-  --text: #23282e;
-  --text-strong: #373c42;
-  --muted: #596069;
-  --muted-2: #889099;
-  --accent: #3e84e5;        /* Magnetic brand blue */
-  --accent-2: #5191f0;
-  --accent-soft: #eaf2fd;
-  --topbar: #373c42;        /* brand charcoal */
-  --topbar-2: #0f1214;
-  --topbar-grad: linear-gradient(90deg, #373c42 0%, #0f1214 100%);
-  --green: #1f9d57;
-  --green-soft: #e6f6ec;
-  --yellow: #c47d04;
-  --yellow-soft: #fdf3e1;
-  --orange: #d4691a;
-  --orange-soft: #fcefe2;
-  --red: #d8362f;
-  --red-soft: #fdeceb;
-  --crit: #b3231d;
-  --shadow: 0 1px 2px rgba(15, 18, 20, 0.06), 0 1px 1px rgba(15, 18, 20, 0.04);
-  --shadow-lg: 0 4px 14px rgba(15, 18, 20, 0.10);
-  --radius: 8px;
+  /* Cisco Secure Access — Magnetic light theme (magnetic-blue-light tokens).
+     Each value defers to an ATLAS token when the shell supplies one, and falls
+     back to the original literal when this engine is served standalone. */
+  --bg: var(--atlas-bg, #f7f7f7);
+  --panel: var(--atlas-surface, #ffffff);
+  --panel-2: var(--atlas-surface-soft, #f7f7f7);
+  --border: var(--atlas-border, #e1e4e8);
+  --border-2: var(--atlas-border-strong, #d0d4d9);
+  --text: var(--atlas-text, #23282e);
+  --text-strong: var(--atlas-text-strong, #373c42);
+  --muted: var(--atlas-text-muted, #596069);
+  --muted-2: var(--atlas-text-subtle, #889099);
+  --accent: var(--atlas-accent, #3e84e5);        /* Magnetic brand blue */
+  --accent-2: var(--atlas-accent-hover, #5191f0);
+  --accent-soft: var(--atlas-accent-soft, #eaf2fd);
+  --topbar: var(--atlas-chrome, #373c42);        /* brand charcoal */
+  --topbar-2: var(--atlas-chrome-deep, #0f1214);
+  --topbar-grad: var(--atlas-chrome-grad, linear-gradient(90deg, #373c42 0%, #0f1214 100%));
+  --green: var(--atlas-success, #1f9d57);
+  --green-soft: var(--atlas-success-soft, #e6f6ec);
+  --yellow: var(--atlas-warning, #c47d04);
+  --yellow-soft: var(--atlas-warning-soft, #fdf3e1);
+  --orange: var(--atlas-caution, #d4691a);
+  --orange-soft: var(--atlas-caution-soft, #fcefe2);
+  --red: var(--atlas-danger, #d8362f);
+  --red-soft: var(--atlas-danger-soft, #fdeceb);
+  --crit: var(--atlas-critical, #b3231d);
+  --shadow: var(--atlas-shadow, 0 1px 2px rgba(15, 18, 20, 0.06), 0 1px 1px rgba(15, 18, 20, 0.04));
+  --shadow-lg: var(--atlas-shadow-lg, 0 4px 14px rgba(15, 18, 20, 0.10));
+  --radius: var(--atlas-radius, 8px);
   --sidebar-w: 78px;
-  --topbar-h: 52px;
+  --topbar-h: var(--atlas-header-h, 52px);
 }
 
 * { box-sizing: border-box; }

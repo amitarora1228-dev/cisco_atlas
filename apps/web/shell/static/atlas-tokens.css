@@ -1,0 +1,109 @@
+/* ATLAS design tokens - the single source of visual truth.
+ *
+ * Both engines already used CSS custom properties, with different names for the
+ * same concepts. Unification is therefore a mapping, not a rewrite: each engine
+ * keeps its own variable names and redefines them in terms of these tokens.
+ *
+ * Every engine alias carries the engine's original value as a fallback, e.g.
+ *   --bg: var(--atlas-bg, #f7f7f7);
+ * so an engine served standalone, without this file, renders exactly as before.
+ *
+ * Palette provenance: the colour foundation is Cisco Magnetic, inherited from
+ * Capture Inspector - it is the real Cisco design system rather than an ad-hoc
+ * choice. The structural tokens (spacing, grouped navigation metrics) follow
+ * DartHawk, whose information architecture is the better of the two.
+ */
+
+:root {
+    /* Surfaces */
+    --atlas-bg: #f4f6f9;
+    --atlas-surface: #ffffff;
+    --atlas-surface-soft: #eef2f7;
+    --atlas-surface-sunken: #e9edf3;
+
+    /* Lines */
+    --atlas-border: #dde2e8;
+    --atlas-border-strong: #c8cfd8;
+
+    /* Text */
+    --atlas-text: #23282e;
+    --atlas-text-strong: #373c42;
+    --atlas-text-muted: #596069;
+    --atlas-text-subtle: #889099;
+    --atlas-text-inverse: #ffffff;
+
+    /* Brand - Cisco Magnetic blue */
+    --atlas-accent: #3e84e5;
+    --atlas-accent-hover: #5191f0;
+    --atlas-accent-soft: #eaf2fd;
+    --atlas-accent-border: #b9d3f7;
+
+    /* Chrome - Magnetic charcoal */
+    --atlas-chrome: #373c42;
+    --atlas-chrome-deep: #0f1214;
+    --atlas-chrome-grad: linear-gradient(90deg, #373c42 0%, #0f1214 100%);
+
+    /* Status. Severity carries meaning in both engines, so these are semantic,
+     * not decorative, and must stay distinguishable from one another. */
+    --atlas-success: #1f9d57;
+    --atlas-success-soft: #e6f6ec;
+    --atlas-warning: #c47d04;
+    --atlas-warning-soft: #fdf3e1;
+    --atlas-caution: #d4691a;
+    --atlas-caution-soft: #fcefe2;
+    --atlas-danger: #d8362f;
+    --atlas-danger-soft: #fdeceb;
+    --atlas-critical: #b3231d;
+    --atlas-info: #3e84e5;
+    --atlas-info-soft: #eaf2fd;
+
+    /* Elevation */
+    --atlas-shadow: 0 1px 2px rgba(15, 18, 20, 0.06), 0 1px 1px rgba(15, 18, 20, 0.04);
+    --atlas-shadow-lg: 0 4px 14px rgba(15, 18, 20, 0.10);
+
+    /* Geometry */
+    --atlas-radius: 8px;
+    --atlas-radius-sm: 5px;
+    --atlas-radius-lg: 12px;
+
+    /* Layout. The rail is wider than Capture Inspector's icon-only 78px because
+     * ATLAS shows two levels - module, then that module's views - and both need
+     * readable labels. */
+    --atlas-header-h: 52px;
+    --atlas-rail-w: 216px;
+    --atlas-rail-w-compact: 78px;
+
+    /* Type. One family across ATLAS; the engines previously loaded three
+     * (Inter, Orbitron, Rajdhani) from two separate CDN requests. */
+    --atlas-font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --atlas-font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+}
+
+/* Darker theme, inherited from DartHawk's existing toggle. Only surfaces, lines
+ * and text invert; brand and status hues hold their meaning across themes. */
+.theme-darker {
+    --atlas-bg: #14181d;
+    --atlas-surface: #1c2127;
+    --atlas-surface-soft: #232931;
+    --atlas-surface-sunken: #0f1316;
+
+    --atlas-border: #2e353d;
+    --atlas-border-strong: #3d454f;
+
+    --atlas-text: #e6eaef;
+    --atlas-text-strong: #f4f6f9;
+    --atlas-text-muted: #a8b1bb;
+    --atlas-text-subtle: #7b848f;
+
+    --atlas-accent-soft: #17263c;
+    --atlas-accent-border: #2b4a75;
+
+    --atlas-success-soft: #12261a;
+    --atlas-warning-soft: #2a2110;
+    --atlas-caution-soft: #2b1c11;
+    --atlas-danger-soft: #2c1513;
+    --atlas-info-soft: #17263c;
+
+    --atlas-chrome: #0f1214;
+    --atlas-chrome-grad: linear-gradient(90deg, #1c2127 0%, #0f1214 100%);
+}

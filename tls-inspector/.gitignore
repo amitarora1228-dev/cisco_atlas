@@ -1,0 +1,52 @@
+# ── Python ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Build / packaging artifacts (PyInstaller etc.) ─────────────────────
+build/
+build-cli/
+build-onefile/
+dist/
+dist-cli/
+dist-onefile/
+*.spec.bak
+*.exe
+*.exe.bak-*
+
+# ── Captures & TLS key material — NEVER COMMIT (may contain real traffic
+#    and session keys that decrypt it) ──────────────────────────────────
+*.pcap
+*.pcapng
+*.har
+*.cap
+*.keys
+*.keylog
+sslkeys*.log
+*keys*.log
+keylog*.txt
+_ztna3_capture/
+samples/
+reports/
+data/
+
+# ── Local analysis output / scratch ───────────────────────────────────
+_dlp_flows.json
+*.private.json
+tpm-keys.json
+vm-credentials*.json
+
+# ── OS / editor noise ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

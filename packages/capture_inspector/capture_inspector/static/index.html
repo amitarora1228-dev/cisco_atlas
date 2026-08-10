@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Cisco Capture Inspector — PCAP &amp; HAR traffic diagnostics</title>
+<title>ATLAS — Cisco endpoint and network diagnostics</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -17,18 +17,18 @@
 <div class="topbar">
   <div class="topbar-left">
     <img class="cisco-logo-img" src="/static/cisco-logo.svg" alt="Cisco" />
-    <span class="topbar-product">Capture Inspector</span>
+    <span class="topbar-product">ATLAS</span>
   </div>
   <div class="topbar-right">
     <span id="tshark-status" class="pill pill-muted">checking engine…</span>
     <span class="topbar-icon" id="help-btn" title="About / quick help">?</span>
-    <span class="topbar-icon avatar" title="Capture Inspector">JM</span>
+    <span class="topbar-icon avatar" title="ATLAS">JM</span>
   </div>
 </div>
 
 <!-- Quick help popover -->
 <div id="help-pop" class="help-pop hidden">
-  <h4>Capture Inspector — quick help</h4>
+  <h4>ATLAS — quick help</h4>
   <ul>
     <li><b>Inspect</b> — upload a PCAP/PCAPNG and/or HAR, then Analyze.</li>
     <li><b>Flows</b> — jump to every connection found in the capture.</li>
@@ -151,7 +151,7 @@ firefox           # Firefox</pre></li>
 
   <main class="content">
     <div class="page-head">
-      <h1>Capture Inspector</h1>
+      <h1>Traffic capture analysis</h1>
       <p class="page-sub">Analyze Wireshark (PCAP) captures and browser (HAR) logs to diagnose TLS decryption, certificates, DNS, proxy/SWG &amp; SASE behavior — with SSO/SAML analysis on the way. Runs 100% locally.</p>
       <button type="button" class="learn-cta" id="learn-cta">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>

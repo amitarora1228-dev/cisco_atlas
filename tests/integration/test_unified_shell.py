@@ -28,10 +28,15 @@ def test_capture_inspector_is_mounted(client):
 
 
 def test_darthawk_is_mounted_through_wsgi(client):
-    """The Flask engine renders its own Jinja template through the WSGI bridge."""
+    """The Flask engine renders its own Jinja template through the WSGI bridge.
+
+    Asserted on markup the engine owns rather than on its product name, which is
+    now ATLAS everywhere the user can see it.
+    """
     response = client.get("/bundle/")
     assert response.status_code == 200
-    assert "DartHawk" in response.text
+    assert 'id="dartFile"' in response.text
+    assert 'id="moduleSelectionWrap"' in response.text
 
 
 def test_darthawk_static_assets_survive_the_bridge(client):

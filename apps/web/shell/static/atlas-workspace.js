@@ -19,6 +19,28 @@
     var CAPTURE = "atlas-engine-capture";
     var BUNDLE = "atlas-engine-bundle";
 
+    /* The bundle engine posts to root-relative paths (/analyze, /inspect-bundle,
+     * ...) because standalone it owns the origin. Here it is mounted under
+     * /bundle, so those calls 404 and the UI reports that it cannot read the
+     * file. Rewriting them here avoids editing seven call sites inside a 398 KB
+     * file whose behaviour is not covered by tests. */
+    var BUNDLE_ROUTES = ["/analyze", "/inspect-bundle", "/agent-chat", "/feedback"];
+
+    function installFetchShim() {
+        var original = window.fetch;
+        window.fetch = function (input, init) {
+            var url = typeof input === "string" ? input : (input && input.url);
+            if (typeof url === "string" && BUNDLE_ROUTES.indexOf(url.split("?")[0]) !== -1) {
+                var rewritten = "/bundle" + url;
+                if (typeof input === "string") {
+                    return original.call(this, rewritten, init);
+                }
+                return original.call(this, new Request(rewritten, input), init);
+            }
+            return original.apply(this, arguments);
+        };
+    }
+
     function el(tag, cls, text) {
         var n = document.createElement(tag);
         if (cls) n.className = cls;
@@ -82,6 +104,9 @@
             if (handOff(scoped(BUNDLE, "#dartFile"), file)) {
                 name.textContent = file.name;
                 label.classList.add("has-file");
+                // A bundle is only actionable from the bundle view, where the
+                // module choice and the analyse button are.
+                showEngine(BUNDLE);
             } else {
                 name.textContent = "could not be loaded";
             }
@@ -156,6 +181,16 @@
         bundleBtn.addEventListener("click", function () { showEngine(BUNDLE); });
         rail.appendChild(bundleBtn);
 
+        // The module choice (ZTA, VPN, Umbrella, UZTNA, EDLP) lives in the
+        // bundle engine's own rail, which the workspace hides. Without it there
+        // is no way to start an analysis at all, so it moves here.
+        var modules = scoped(BUNDLE, "#moduleSelectionWrap");
+        if (modules) {
+            modules.classList.add("atlas-rail-modules");
+            modules.addEventListener("change", function () { showEngine(BUNDLE); });
+            rail.appendChild(modules);
+        }
+
         rail.addEventListener("click", function (e) {
             var item = e.target.closest(".atlas-rail-item");
             if (item) markActive(item);
@@ -166,6 +201,7 @@
     /* ---------------------------------------------------------------------- */
 
     function init() {
+        installFetchShim();
         rebuildEvidence();
 
         var layout = el("div", "atlas-layout");

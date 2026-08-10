@@ -13,6 +13,11 @@ matters: **does observed behaviour match declared configuration?** Neither tool
 can produce that answer alone - a capture cannot cite a configuration profile,
 and a bundle cannot observe the wire.
 
+> **Working on this project?** Read [`docs/STATE.md`](docs/STATE.md) first - it
+> holds current status, known limitations and the traps already paid for - and
+> [`AGENTS.md`](AGENTS.md) for how to work here. Both are kept current as work
+> happens rather than on request.
+
 ## Requirements
 
 - **Python 3.10+** (3.12 is what CI and production use)
@@ -96,10 +101,13 @@ or key material is ever committed.
 
 | Document | Contents |
 |---|---|
-| [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) | Platform comparison, unification strategy, phased plan, decisions taken |
-| [`packages/capture_inspector/docs/HANDOFF.md`](packages/capture_inspector/docs/HANDOFF.md) | Capture Inspector internals; section 11 covers the DART merge and section 12 its JSON contract |
+| [`docs/STATE.md`](docs/STATE.md) | **Living project state** — status, known limitations, traps. Read first, update last |
+| [`AGENTS.md`](AGENTS.md) | How to work in this repository |
+| [`docs/README.md`](docs/README.md) | Documentation index |
+| [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md) | Platform comparison, unification strategy, decisions taken |
+| [`docs/PHASE2_CORRELATION.md`](docs/PHASE2_CORRELATION.md) | What correlation makes possible, in dependency order |
 | [`packages/capture_inspector/docs/DETECTION.md`](packages/capture_inspector/docs/DETECTION.md) | Per-detector catalog: what each detects, how, and what it cannot see |
-| [`packages/darthawk/README.md`](packages/darthawk/README.md) | Running DartHawk standalone |
+| [`packages/darthawk/README.md`](packages/darthawk/README.md) | Running the bundle engine standalone |
 
 ## The principle that governs both engines
 

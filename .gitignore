@@ -30,3 +30,15 @@ feedback.rtf
 
 # --- Stray assets ---
 kisspng-*.webp
+
+# Evidence and capture material - NEVER COMMIT.
+# A HAR carries full HTTP traffic including headers and cookies; a capture plus
+# its key log decrypts the session it recorded; a DART bundle carries endpoint
+# and organisation identifiers.
+*.har
+*.cap
+*.keys
+*.keylog
+sslkeys*.log
+keylog*.txt
+TEST DATA DO NOT UPLOAD/

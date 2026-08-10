@@ -180,7 +180,7 @@
      * of a blanket run. They stay available by selecting the module manually.
      */
 
-    function renderBundleResults(results) {
+    function renderBundleResults(results, excluded) {
         var host = document.getElementById("atlas-bundle-results");
         if (!host) {
             host = el("section", "atlas-results");
@@ -209,6 +209,17 @@
             box.appendChild(body);
             host.appendChild(box);
         });
+
+        // A skipped check should be a visible choice, not a silent gap.
+        (excluded || []).forEach(function (x) {
+            var box = el("div", "atlas-result is-skipped");
+            var head = el("div", "atlas-result-head");
+            head.appendChild(el("span", "atlas-result-name", x.label));
+            head.appendChild(el("span", "atlas-result-state", "not run"));
+            box.appendChild(head);
+            box.appendChild(el("p", "atlas-result-reason", x.reason));
+            host.appendChild(box);
+        });
     }
 
     function analyzeEntireBundle() {
@@ -226,7 +237,7 @@
         fetch("/atlas/api/bundle/analyze-all", { method: "POST", body: body })
             .then(function (res) { return res.json(); })
             .then(function (data) {
-                renderBundleResults(data.results || []);
+                renderBundleResults(data.results || [], data.excluded || []);
                 clearNotice();
             })
             .catch(function (e) {

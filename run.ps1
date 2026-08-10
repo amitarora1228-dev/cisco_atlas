@@ -35,6 +35,15 @@ if (-not (Test-Path $python)) {
     py -3 -m venv $venv
 }
 
+# python-evtx was replaced by pyevtx-rs. They install as 'Evtx' and 'evtx', which
+# collide on any case-insensitive filesystem - Windows, and macOS by default.
+# pip will not remove the old one on its own, so an existing venv needs this.
+& $python -c "import Evtx" 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[atlas] removing superseded python-evtx"
+    & $python -m pip uninstall --quiet --yes python-evtx
+}
+
 Write-Host "[atlas] installing pinned dependencies"
 & $python -m pip install --quiet --upgrade pip
 & $python -m pip install --quiet `

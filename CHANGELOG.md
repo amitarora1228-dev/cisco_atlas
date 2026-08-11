@@ -60,6 +60,18 @@ under `[Unreleased]` until one is cut.
 
 ### Fixed
 
+- **The Report view was unreachable without a capture.** Two causes, both
+  found by measurement. The engine treats its views as scroll targets on one
+  long page and its Report handler returns the reader to the evidence card
+  unless *it* has analysed a capture; and the shell's report block was being
+  rendered inside `#sec-report`, which sits inside `#results`, which the engine
+  keeps hidden until then - so it was present with 387,541 characters of
+  content and zero height. The block now lives outside that subtree, carries
+  its own Download button when there is no capture, and the shell takes over
+  the Report click only when the engine would have refused. Verified: bundle
+  alone now scrolls to a rendered report (scrollY 1739, section on screen,
+  387,719 characters exported); with a capture the engine's own handler still
+  runs and targets `sec-report`, unchanged.
 - **Every capture failed on Wireshark below 3.6.** `tls.handshake.ja3` and
   `ja3s` arrived in 3.6; tshark rejects the entire run if any one `-e` field is
   unknown, so the 3.4.7 build in use returned "Some fields aren't valid" for

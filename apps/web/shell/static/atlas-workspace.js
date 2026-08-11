@@ -623,34 +623,89 @@
             }, true);
             button.disabled = false;
         });
+
+        /* Make Report reachable without a capture.
+         *
+         * The capture engine's views are scroll targets on one long page, and
+         * its Report handler sends the reader back to the evidence card unless
+         * *it* has results:
+         *
+         *     if (!resultsReady()) { scrollToEl("sec-evidence"); return; }
+         *
+         * That was right when the report only described a capture. It is wrong
+         * now the report also covers the bundle and the correlation, and it
+         * looks like the Report button doing nothing.
+         *
+         * This listens on the document in the capture phase, which runs before
+         * any listener on the button itself, so the engine's handler never
+         * runs and there is no race between two smooth scrolls. It only takes
+         * over when the engine would have refused and there is genuinely
+         * something to read; otherwise the engine keeps its own behaviour.
+         */
+        document.addEventListener("click", function (event) {
+            var nav = event.target && event.target.closest
+                ? event.target.closest("#nav-report")
+                : null;
+            if (!nav) return;
+            if (captureHasResults() || !reportSections().length) return;
+
+            event.stopPropagation();
+            markActive(nav);
+            showEngine(CAPTURE);
+            var target = document.getElementById("atlas-report-extra");
+            if (!target) return;
+            // The engine was hidden a moment ago, so its layout is stale.
+            // Reading a layout property forces the reflow synchronously, which
+            // is deterministic - waiting for an animation frame is not, since
+            // frames are throttled in a background tab. The jump is instant
+            // rather than smooth: this is a view switch, and a smooth scroll
+            // across a long page is slower to read.
+            void target.offsetHeight;
+            target.scrollIntoView({ block: "start" });
+        }, true);
+    }
+
+    function captureHasResults() {
+        var results = document.querySelector("#" + CAPTURE + " #results");
+        return !!results && !results.classList.contains("hidden");
     }
 
     /* What is on screen and what is downloaded are built from the same call,
-     * so a report can never promise something the Report view did not show. */
+     * so a report can never promise something the Report view did not show.
+     *
+     * This block deliberately does *not* live inside the engine's own
+     * `#sec-report`. That sits inside `#results`, which the engine keeps
+     * hidden until it has analysed a capture - so with only a bundle loaded
+     * the report was rendered correctly and then displayed at zero height,
+     * which looked like the Report button doing nothing.
+     */
     function renderReportView() {
-        var section = document.querySelector("#" + CAPTURE + " #sec-report");
-        if (!section) return;
+        var content = document.querySelector("#" + CAPTURE + " main.content")
+            || document.getElementById(CAPTURE);
+        if (!content) return;
 
         var host = document.getElementById("atlas-report-extra");
         if (!host) {
             host = el("div", "atlas-corr-block");
             host.id = "atlas-report-extra";
-            section.appendChild(host);
+            content.appendChild(host);
         }
         host.innerHTML = "";
 
-        var sections = reportSections().filter(function (pair) {
-            return pair[0] !== "Traffic capture";
-        });
+        var all = reportSections();
+        var sections = all.filter(function (pair) { return pair[0] !== "Traffic capture"; });
         if (!sections.length) return;
 
-        host.appendChild(el("h3", null, "Also in this report"));
+        var hasCaptureReport = all.length !== sections.length;
+        host.appendChild(el("h3", null, hasCaptureReport ? "Also in this report" : "Report"));
         host.appendChild(el(
             "p",
             "atlas-corr-blurb",
-            "The capture's own report is above. These sections come from the other "
-                + "artefacts, and the Download button emits all of them together with a "
-                + "record of which files they were made from."
+            (hasCaptureReport
+                ? "The capture's own report is above. These sections come from the other artefacts, and "
+                : "These sections come from the artefacts analysed so far, and ")
+                + "the Download button emits all of them together with a record of which files "
+                + "they were made from."
         ));
         sections.forEach(function (pair) {
             var block = el("details", "atlas-report-part");
@@ -658,6 +713,18 @@
             block.appendChild(el("pre", null, pair[1]));
             host.appendChild(block);
         });
+
+        // The engine's own Download button is inside the hidden results
+        // section, so with no capture there would be no way to export at all.
+        if (!hasCaptureReport && !document.getElementById("atlas-report-download")) {
+            var button = el("button", "atlas-corr-run", "Download report (.txt)");
+            button.type = "button";
+            button.id = "atlas-report-download";
+            button.addEventListener("click", downloadReport);
+            host.appendChild(button);
+        } else if (!hasCaptureReport) {
+            host.appendChild(document.getElementById("atlas-report-download"));
+        }
     }
 
     function analyzeEntireBundle() {

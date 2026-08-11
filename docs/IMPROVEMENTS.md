@@ -130,16 +130,20 @@ otherwise pay the tax a fourth time.
 
 **Evidence.** Four bugs reached the user during recent work that a test could
 have caught: the `offsetParent` visibility guard, the HAR-only rows, the stale
-cache-buster, and the bundle-only view. All four are frontend behaviour; the
-suite is 55 tests and entirely Python.
+cache-buster, the bundle-only view, and the Report view being unreachable
+without a capture. All are frontend behaviour in the shell seam; the suite is 55
+tests and entirely Python.
 
-**Why it matters.** The pattern is clear - the engines are tested, the *shell*
-that composes them is not, and every one of those bugs lived in the seam.
+**Why it matters.** The pattern is now unmistakable - the engines are tested,
+the *shell* that composes them is not, and every one of those bugs lived in the
+seam. Two of them were the same shape: a shell contribution rendered into a
+subtree the engine keeps hidden.
 
 **What it needs.** A small browser-level test covering the paths a user actually
-takes: each artefact alone, each pair, all three. It does not need to assert
-appearance, only that results become visible and that no path leaves the reader
-on a page with nothing on it.
+takes: each artefact alone, each pair, all three, and each rail destination
+after each. It does not need to assert appearance, only that results become
+**visible** - zero height is the failure mode that keeps recurring - and that no
+path leaves the reader on a page with nothing on it.
 
 ---
 

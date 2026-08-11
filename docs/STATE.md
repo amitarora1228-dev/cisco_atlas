@@ -481,6 +481,25 @@ Every one of these was a real failure here, not a hypothetical.
   reader was not looking at, and cleared its own notice - indistinguishable from
   nothing having happened. The rule is now conditional: take the view only when
   there is no other result to hide behind it.
+- **The capture engine's "views" are scroll targets on one page, not views.**
+  Its nav handlers call `scrollIntoView` on a section and refuse outright when
+  the engine has no results of its own: `if (!resultsReady()) {
+  scrollToEl("sec-evidence"); return; }`. Anything the shell adds to that page
+  must either satisfy `resultsReady()` or take the click over before the
+  engine sees it - a capture-phase listener on `document` runs before any
+  listener on the button itself, which avoids two handlers racing.
+- **`#sec-report` lives inside `#results`, which is hidden until a capture is
+  analysed.** Content appended there is rendered, reports a computed `display`
+  of `block`, returns its full text from `innerText`, and has zero height.
+  Anything that must be visible without a capture belongs outside that subtree.
+- **`requestAnimationFrame` is throttled in a background tab**, so deferring
+  work to a frame is not deterministic and cannot be verified in the browser
+  harness. To scroll to something just revealed, force the reflow synchronously
+  by reading a layout property (`void node.offsetHeight`) instead.
+- **Smooth scrolling does not animate in the headless harness.** A
+  `scrollIntoView({behavior: "smooth"})` leaves `scrollY` at 0 there while
+  working normally in a real browser. Assert that the call was made and its
+  target, not the final scroll position.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

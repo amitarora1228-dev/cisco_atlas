@@ -138,7 +138,8 @@
         drops.appendChild(buildBundleCard());
     }
 
-    /* Say what is actually loaded, not what was last clicked.
+    /* Say what is actually loaded, not what was last clicked - and let it be
+     * taken back.
      *
      * Every filename label here is written by a `change` or `drop` handler and
      * by nothing else, so it describes the last interaction rather than the
@@ -148,26 +149,62 @@
      * file, and the screen looks like it invented one: a correlation reporting
      * "capture + bundle + har" beside two tiles claiming nothing was chosen.
      *
-     * The files are real, so they are not discarded. The labels are corrected
-     * to match them.
+     * The files are real, so they are not discarded behind the user's back.
+     * The labels are corrected to match them, and each tile gains a Remove
+     * control - without one there was no way to take a file back at all, which
+     * is what made a restored selection feel like the tool inventing data.
      */
-    function syncEvidenceLabels() {
-        [
-            ["#" + CAPTURE + " #pcap", "pcap-name", "drop-pcap", true],
-            ["#" + CAPTURE + " #har", "har-name", "drop-har", true],
-            ["#" + CAPTURE + " #keylog", "keylog-name", "drop-keylog", true],
-            ["#" + BUNDLE + " #dartFile", "bundle-name", "drop-bundle", false]
-        ].forEach(function (spec) {
-            var input = document.querySelector(spec[0]);
-            var label = document.getElementById(spec[1]);
-            var drop = document.getElementById(spec[2]);
-            if (!input || !label || !input.files || !input.files.length) return;
-            var file = input.files[0];
-            label.textContent = spec[3]
+    var EVIDENCE_TILES = [
+        { input: "#" + CAPTURE + " #pcap", label: "pcap-name", drop: "drop-pcap", size: true },
+        { input: "#" + CAPTURE + " #har", label: "har-name", drop: "drop-har", size: true },
+        { input: "#" + CAPTURE + " #keylog", label: "keylog-name", drop: "drop-keylog", size: true },
+        { input: "#" + BUNDLE + " #dartFile", label: "bundle-name", drop: "drop-bundle", size: false }
+    ];
+
+    function refreshEvidenceTiles() {
+        EVIDENCE_TILES.forEach(function (tile) {
+            var input = document.querySelector(tile.input);
+            var label = document.getElementById(tile.label);
+            var drop = document.getElementById(tile.drop);
+            if (!input || !label || !drop) return;
+
+            var file = input.files && input.files[0];
+            var clear = drop.querySelector(".atlas-clear");
+
+            if (!file) {
+                label.textContent = "no file selected";
+                drop.classList.remove("has-file");
+                if (clear) clear.parentNode.removeChild(clear);
+                return;
+            }
+
+            label.textContent = tile.size
                 ? file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)"
                 : file.name;
-            if (drop) drop.classList.add("has-file");
+            drop.classList.add("has-file");
+
+            if (clear) return;
+            clear = el("button", "atlas-clear", "Remove");
+            clear.type = "button";
+            clear.title = "Remove this file";
+            // The tile is a <label> wrapping the input, so a plain click here
+            // would reopen the file picker instead of clearing it.
+            clear.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                input.value = "";
+                refreshEvidenceTiles();
+            });
+            drop.appendChild(clear);
         });
+    }
+
+    function wireEvidenceTiles() {
+        EVIDENCE_TILES.forEach(function (tile) {
+            var input = document.querySelector(tile.input);
+            if (input) input.addEventListener("change", refreshEvidenceTiles);
+        });
+        refreshEvidenceTiles();
     }
 
     /* ---- analysis -------------------------------------------------------- */
@@ -1540,7 +1577,7 @@
     function init() {
         installFetchShim();
         rebuildEvidence();
-        syncEvidenceLabels();
+        wireEvidenceTiles();
         wireAnalyze();
         wireReport();
 

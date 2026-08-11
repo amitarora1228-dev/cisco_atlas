@@ -20,6 +20,11 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **A Remove control on every evidence tile.** There was no way to take a file
+  back once chosen, which is what made a browser-restored selection feel like
+  the tool inventing data: the file was genuinely still attached and could not
+  be detached. Verified: removing the capture clears its input and label and
+  leaves the bundle untouched.
 - **A running analysis now says it is still running.** The notice was written
   once - "This can take a minute" - and then never changed, so a two-to-three
   minute concurrent run was indistinguishable from a hang. It has been reported

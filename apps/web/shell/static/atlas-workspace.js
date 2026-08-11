@@ -676,7 +676,20 @@
             .then(function (data) {
                 renderBundleResults(data.results || [], data.excluded || []);
                 renderReportView();
-                clearNotice();
+                // Analyze does not steal the view, because doing so used to hide
+                // the capture analysis the same click had started. But when the
+                // bundle is the only artefact there is nothing to hide, and
+                // leaving the reader on an empty Inspect page while the results
+                // sit in a panel they cannot see reads as nothing having
+                // happened at all.
+                if (!loadedFiles().capture) {
+                    showEngine(BUNDLE);
+                    clearNotice();
+                } else {
+                    announce(
+                        "Bundle analysis is ready. Open Bundle analysis in the rail to read it."
+                    );
+                }
             })
             .catch(function (e) {
                 announce("The bundle could not be analysed: " + e);
@@ -719,6 +732,9 @@
                     if (form) {
                         setSummaryMode(false);
                         form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+                        // Same reasoning as the whole-bundle path: only take the
+                        // view when there is no capture result to hide behind it.
+                        if (!loaded.capture) showEngine(BUNDLE);
                     }
                 } else {
                     analyzeEntireBundle();

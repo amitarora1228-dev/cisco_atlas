@@ -474,6 +474,13 @@ Every one of these was a real failure here, not a hypothetical.
   built from the DOM at the moment of export, so it cannot describe a different
   run than the one on screen. Measured: 641,914 characters against 293, opening
   with the filenames of every artefact analysed.
+- **Not moving the view has a mirror-image failure.** Analyze was changed to stop
+  jumping to the bundle engine, because that hid the capture analysis the same
+  click had started. With a bundle as the *only* artefact that produced the
+  opposite bug: the analysis ran, rendered 387,299 characters into a panel the
+  reader was not looking at, and cleared its own notice - indistinguishable from
+  nothing having happened. The rule is now conditional: take the view only when
+  there is no other result to hide behind it.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

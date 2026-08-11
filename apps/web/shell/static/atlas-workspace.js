@@ -18,6 +18,7 @@
 
     var CAPTURE = "atlas-engine-capture";
     var BUNDLE = "atlas-engine-bundle";
+    var CORRELATE = "atlas-engine-correlate";
 
     /* The bundle engine posts to root-relative paths (/analyze, /inspect-bundle,
      * ...) because standalone it owns the origin. Here it is mounted under
@@ -551,10 +552,289 @@
         note.classList.add("is-visible");
     }
 
+    /* ---- correlation ----------------------------------------------------- */
+
+    /* Correlation reuses the files already chosen in "Provide evidence" rather
+     * than asking for them again. A second set of inputs would let the two
+     * drift apart, and a correlation run against different files than the
+     * analysis above it would be quietly wrong. */
+    function correlationFiles() {
+        var pick = function (sel) {
+            var n = document.querySelector(sel);
+            return n && n.files && n.files.length ? n.files[0] : null;
+        };
+        return {
+            capture: pick("#" + CAPTURE + " #pcap"),
+            har: pick("#" + CAPTURE + " #har"),
+            bundle: pick("#" + BUNDLE + " #dartFile")
+        };
+    }
+
+    var STEERING = {
+        steered: {
+            label: "Steered",
+            hint: "The agent intercepted this locally and carried it over the tunnel."
+        },
+        direct: {
+            label: "Direct",
+            hint: "This reached the peer without passing through the agent."
+        },
+        unknown: {
+            label: "Not determined",
+            hint: "The capture holds no handshake naming this host."
+        }
+    };
+
+    function correlateSummary(data) {
+        var strip = el("div", "atlas-corr-summary");
+        var counts = [
+            ["Hosts", data.summary.hosts],
+            ["Steered", data.summary.steered],
+            ["Direct", data.summary.direct],
+            ["Not determined", data.summary.unknown],
+            ["Tunnels matched", data.summary.tunnels],
+            ["Requests", data.summary.requests],
+            ["Failed requests", data.summary.failures]
+        ];
+        counts.forEach(function (pair) {
+            var cell = el("div", "atlas-corr-stat");
+            cell.appendChild(el("span", "atlas-corr-stat-value", String(pair[1])));
+            cell.appendChild(el("span", "atlas-corr-stat-label", pair[0]));
+            if (pair[0] === "Failed requests" && pair[1] > 0) cell.classList.add("is-warning");
+            strip.appendChild(cell);
+        });
+        return strip;
+    }
+
+    /* The offset is a measurement with a stated basis, not a correction that
+     * has been applied. Showing the basis is the point: an offset derived from
+     * one connection deserves less trust than one derived from twenty, and the
+     * reader can only weigh that if the basis travels with the number. */
+    function correlateClock(data) {
+        if (!data.clock || !data.clock.basis) return null;
+        var box = el("div", "atlas-corr-clock");
+        var value = data.clock.offset_seconds;
+        box.appendChild(el(
+            "strong",
+            null,
+            value === null || value === undefined
+                ? "Clock offset not measured"
+                : "Clock offset at most " + value.toFixed(3) + "s"
+        ));
+        box.appendChild(el("span", null, data.clock.basis));
+        return box;
+    }
+
+    function correlateHosts(data) {
+        var section = el("section", "atlas-corr-block");
+        section.appendChild(el("h3", null, "What happened to each host"));
+        section.appendChild(el(
+            "p",
+            "atlas-corr-blurb",
+            "Steering is read from the wire: a TLS handshake to the agent's local "
+                + "listener means it was steered, one straight to the peer means it "
+                + "was not. The browser's own record supplies the requests and status "
+                + "codes."
+        ));
+
+        if (!data.hosts.length) {
+            section.appendChild(el("p", "atlas-corr-empty", "No hosts were identified."));
+            return section;
+        }
+
+        var table = el("table", "atlas-corr-table");
+        var head = el("tr");
+        ["Host", "Steering", "Requests", "Failed", "Evidence"].forEach(function (name) {
+            head.appendChild(el("th", null, name));
+        });
+        table.appendChild(el("thead")).appendChild(head);
+
+        var body = el("tbody");
+        data.hosts.forEach(function (host) {
+            var meta = STEERING[host.steering] || STEERING.unknown;
+            var row = el("tr");
+            row.appendChild(el("td", "atlas-corr-host", host.host));
+
+            var badgeCell = el("td");
+            var badge = el("span", "atlas-corr-badge is-" + host.steering, meta.label);
+            badge.title = meta.hint;
+            badgeCell.appendChild(badge);
+            row.appendChild(badgeCell);
+
+            row.appendChild(el("td", "atlas-corr-num", String(host.requests)));
+            var failed = el("td", "atlas-corr-num", String(host.failures));
+            if (host.failures) failed.classList.add("is-warning");
+            row.appendChild(failed);
+
+            var evidence = el("td", "atlas-corr-basis");
+            evidence.appendChild(el("span", null, host.basis));
+            var codes = Object.keys(host.statuses || {});
+            if (codes.length) {
+                evidence.appendChild(el(
+                    "span",
+                    "atlas-corr-sub",
+                    "Status codes: " + codes.map(function (c) {
+                        return c + " x" + host.statuses[c];
+                    }).join(", ")
+                ));
+            }
+            row.appendChild(evidence);
+            body.appendChild(row);
+        });
+        table.appendChild(body);
+        section.appendChild(table);
+        return section;
+    }
+
+    function correlateTunnels(data) {
+        var section = el("section", "atlas-corr-block");
+        section.appendChild(el("h3", null, "Tunnels the agent and the capture both saw"));
+        section.appendChild(el(
+            "p",
+            "atlas-corr-blurb",
+            "Matched on connection identity - source port and destination - so these "
+                + "are the same connection in both records, with no reliance on either "
+                + "clock. Many hosts share one tunnel, so a request cannot be "
+                + "attributed to a particular tunnel here."
+        ));
+
+        if (!data.tunnels.length) {
+            section.appendChild(el(
+                "p",
+                "atlas-corr-empty",
+                "No connection appeared in both the capture and the agent's log."
+            ));
+            return section;
+        }
+
+        data.tunnels.forEach(function (tunnel) {
+            var card = el("div", "atlas-corr-tunnel");
+            var head = el("div", "atlas-corr-tunnel-head");
+            head.appendChild(el("code", null, tunnel.label));
+            head.appendChild(el(
+                "span",
+                "atlas-corr-sub",
+                tunnel.packets + " packets, " + tunnel.agent_lines + " agent log line(s)"
+                    + (tunnel.handshake_captured ? "" : " - already open when the capture began")
+            ));
+            card.appendChild(head);
+
+            (tunnel.errors || []).forEach(function (line) {
+                var row = el("div", "atlas-corr-event is-error");
+                row.appendChild(el("span", "atlas-corr-event-tag", "Error"));
+                row.appendChild(el("span", null, line));
+                card.appendChild(row);
+            });
+            (tunnel.warnings || []).forEach(function (line) {
+                var row = el("div", "atlas-corr-event is-warning");
+                row.appendChild(el("span", "atlas-corr-event-tag", "Warning"));
+                row.appendChild(el("span", null, line));
+                card.appendChild(row);
+            });
+            section.appendChild(card);
+        });
+        return section;
+    }
+
+    function correlateNotes(data) {
+        if (!data.notes || !data.notes.length) return null;
+        var box = el("section", "atlas-corr-block atlas-corr-notes");
+        box.appendChild(el("h3", null, "What these inputs could not answer"));
+        var list = el("ul");
+        data.notes.forEach(function (note) {
+            list.appendChild(el("li", null, note));
+        });
+        box.appendChild(list);
+        return box;
+    }
+
+    function renderCorrelation(data) {
+        var host = document.getElementById("atlas-corr-results");
+        if (!host) return;
+        host.innerHTML = "";
+        host.appendChild(correlateSummary(data));
+        var clock = correlateClock(data);
+        if (clock) host.appendChild(clock);
+        host.appendChild(correlateHosts(data));
+        host.appendChild(correlateTunnels(data));
+        var notes = correlateNotes(data);
+        if (notes) host.appendChild(notes);
+    }
+
+    function runCorrelation(button, status) {
+        var files = correlationFiles();
+        if (!files.capture && !files.har && !files.bundle) {
+            status.textContent = "Add a capture, a HAR or a DART bundle in Provide evidence first.";
+            return;
+        }
+
+        var form = new FormData();
+        if (files.capture) form.append("capture", files.capture);
+        if (files.har) form.append("har", files.har);
+        if (files.bundle) form.append("bundle", files.bundle);
+
+        button.disabled = true;
+        status.textContent = "Correlating...";
+
+        fetch("/atlas/api/correlate", { method: "POST", body: form })
+            .then(function (response) {
+                return response.json().then(function (data) {
+                    if (!response.ok) throw new Error(data.error || "Correlation failed.");
+                    return data;
+                });
+            })
+            .then(function (data) {
+                var supplied = Object.keys(data.sources || {});
+                status.textContent = "Correlated " + (supplied.length || 0)
+                    + " artefact(s): " + (supplied.join(", ") || "none");
+                renderCorrelation(data);
+            })
+            .catch(function (err) {
+                status.textContent = err.message || "Correlation failed.";
+            })
+            .then(function () {
+                button.disabled = false;
+            });
+    }
+
+    function buildCorrelateView() {
+        var view = el("div", "atlas-engine atlas-corr");
+        view.id = CORRELATE;
+
+        var head = el("header", "atlas-corr-head");
+        head.appendChild(el("h2", null, "Correlation"));
+        head.appendChild(el(
+            "p",
+            null,
+            "Each artefact holds a different half of the same session. The browser "
+                + "knows hostnames and status codes but records a synthetic address "
+                + "when traffic is steered; the capture sees both the local leg and "
+                + "the encrypted tunnel but no hostnames on the tunnel; the bundle "
+                + "knows what the agent believed it was doing. Joined, they answer "
+                + "what none of them can answer alone."
+        ));
+        view.appendChild(head);
+
+        var bar = el("div", "atlas-corr-bar");
+        var button = el("button", "atlas-corr-run", "Correlate the evidence");
+        button.type = "button";
+        var status = el("span", "atlas-corr-status");
+        status.setAttribute("role", "status");
+        button.addEventListener("click", function () { runCorrelation(button, status); });
+        bar.appendChild(button);
+        bar.appendChild(status);
+        view.appendChild(bar);
+
+        var results = el("div", null);
+        results.id = "atlas-corr-results";
+        view.appendChild(results);
+        return view;
+    }
+
     /* ---- navigation ------------------------------------------------------ */
 
     function showEngine(which) {
-        [CAPTURE, BUNDLE].forEach(function (id) {
+        [CAPTURE, BUNDLE, CORRELATE].forEach(function (id) {
             var node = document.getElementById(id);
             if (node) node.classList.toggle("is-active", id === which);
         });
@@ -634,6 +914,26 @@
             realModules.addEventListener("change", syncModuleSelection);
         }
 
+        // Correlation is neither engine's view: it consumes the output of both,
+        // so it sits in its own section rather than under either heading.
+        rail.appendChild(el("div", "atlas-rail-title", "Across artefacts"));
+        var corrBtn = el("button", "atlas-rail-item");
+        corrBtn.type = "button";
+        var corrIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        corrIcon.setAttribute("viewBox", "0 0 24 24");
+        corrIcon.setAttribute("fill", "none");
+        corrIcon.setAttribute("stroke", "currentColor");
+        corrIcon.setAttribute("stroke-width", "1.6");
+        corrIcon.setAttribute("stroke-linecap", "round");
+        corrIcon.innerHTML = '<circle cx="8" cy="12" r="5"/><circle cx="16" cy="12" r="5"/>';
+        corrBtn.appendChild(corrIcon);
+        corrBtn.appendChild(el("span", null, "Correlation"));
+        corrBtn.addEventListener("click", function () {
+            setSummaryMode(false);
+            showEngine(CORRELATE);
+        });
+        rail.appendChild(corrBtn);
+
         rail.addEventListener("click", function (e) {
             var item = e.target.closest(".atlas-rail-item");
             if (item) markActive(item);
@@ -671,6 +971,7 @@
             var node = document.getElementById(id);
             if (node) main.appendChild(node);
         });
+        main.appendChild(buildCorrelateView());
         layout.appendChild(main);
         document.body.appendChild(layout);
 

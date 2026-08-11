@@ -209,10 +209,58 @@ fallback, but PATH is the supported arrangement.
 | Run-everything results view (summary mode) | **Done** — see below |
 | Rename to ATLAS (user-facing) | **Done** |
 | Identity join (org ID) in `atlas_core` | **Done**, unproven against a real bundle |
+| Flow-level correlation (bundle + capture + HAR) | **Done** — see below. Proven against a real three-artefact session |
+| Time alignment between log and packet clocks | **Done for connections whose handshake was captured** — derived, reported as an upper bound, never silently applied |
 | Unified findings model | **Not started** — the keystone for Phase 2 |
 | Structured result contract for the bundle engine | **Not started** — blocks everything above |
-| Time alignment between log and packet clocks | **Not started** — highest leverage |
 | Auth, tenant isolation, retention | **Not started** — required before hosting |
+
+---
+
+## 4a. Flow-level correlation
+
+`packages/atlas_core/atlas_core/flows.py`, exposed at `POST /atlas/api/correlate`
+and rendered by the **Correlation** rail entry. It answers, for one browsing
+session, what no single artefact can:
+
+- **Which hosts were steered through the agent and which went direct.** Read from
+  the wire: a TLS handshake to the agent's local listener means steered, one
+  straight to the peer means direct. A host with no captured handshake is
+  reported as *not determined*, never assumed direct.
+- **Which connections the agent and the capture both saw.** Joined on connection
+  identity, so no clock is involved and the join is exact.
+- **What the browser experienced on top of them** — requests, status codes and
+  failures, attached last because the browser's account is the least
+  authoritative about what reached the network.
+
+### The join keys
+
+| Join | Key | Strength |
+|---|---|---|
+| Agent log ↔ capture | `<proto>_<srcport>__<dstip>:<dstport>` from the ZTA log | **Exact** — connection identity |
+| Capture ↔ HAR | TLS SNI on the wire vs the HAR's host | **Observed** |
+| Tunnel ↔ request | time and multiplexing | **Associated** — many hosts share one tunnel, so a request cannot be attributed to a particular tunnel |
+
+These are not presented as equal, in the UI or the payload.
+
+### Two things it deliberately does not do
+
+- **It does not hardcode a vendor synthetic-IP range.** A server address is
+  called synthetic because it appears in the HAR and never appears as a peer in
+  the capture — provable from the inputs, and it does not break when the range
+  changes.
+- **It does not apply the clock offset.** The offset is reported with the basis
+  that produced it, including how many connections it was derived from, because
+  an offset from one connection deserves less trust than one from twenty.
+
+### Measured on a real session (YouTube, three artefacts)
+
+19 hosts, 18 steered, 1 direct, 5 tunnels matched, 162 requests, 9 failures;
+offset at most 5.888 s from 1 handshake-captured connection. The finding neither
+engine could produce alone: two `googlevideo.com` CDN hosts were steered and
+returned **403/502 for every request, 0 bytes**, while `accounts.youtube.com`
+reached its peer directly. That is a correlation, not a cause, and is presented
+as one.
 
 ---
 
@@ -312,6 +360,22 @@ Every one of these was a real failure here, not a hypothetical.
 - **A new finding category must be registered in all five `CLASSIFICATION_*`
   tables** in the capture engine or it is computed and never displayed. This has
   shipped twice.
+- **The ZTA agent logs flow IDs under three prefixes, not one.** `tcp_`, `tls_`
+  *and* `http2_`. Grepping only `tcp_` finds nothing interesting, because the
+  multiplexed tunnel — where the errors live — is only ever `http2_`. This cost
+  two failed hypotheses before the log was actually read.
+- **Ephemeral source ports are reused.** A ZTA log spanning two days will offer a
+  day-old connection with the same source port and destination as a captured
+  flow. Correlation splits log lines into episodes on a 5-minute gap and refuses
+  a match outside a 15-minute tolerance, *counting the refusals into a visible
+  note*. Without this the derived clock offset went to −2434 s.
+- **A clock offset is only sound where the handshake was captured.** A long-lived
+  flow already in progress when the capture started has a first captured packet
+  that is not the connection start; including it put the offset at −122 s.
+- **A capture flow's direction is not given by its first captured packet.** When
+  the first packet is server→client the source port reads 443 and every join
+  fails. A SYN-without-ACK anchors the client; with no handshake, the lower port
+  is the listener.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all
@@ -330,6 +394,8 @@ Every one of these was a real failure here, not a hypothetical.
 | Keep both engines, wrap rather than rewrite | Preserves validated detection logic |
 | Colour foundation from Cisco Magnetic; information architecture from the bundle engine | The palette is the real Cisco design system; the grouped rail is the better structure |
 | Internal identifiers keep their old names | Renaming `DARTHAWK_*`, `darthawkTheme` and package names touches imports and stored user preferences for no visible gain |
+| Correlation reuses the files already chosen in "Provide evidence" | A second set of inputs would let the two drift apart, and a correlation run against different files than the analysis above it would be quietly wrong |
+| Correlation uploads are deleted when the request finishes | A capture and a bundle together identify an endpoint, and with a key log would decrypt the session they recorded. Nothing is retained |
 
 Full reasoning in [ASSESSMENT.md](ASSESSMENT.md) §10.
 

@@ -205,6 +205,100 @@ async def analyze_entire_bundle(file: UploadFile = File(...)) -> JSONResponse:
     return JSONResponse({"results": results, "excluded": _BUNDLE_EXCLUDED})
 
 
+@app.post("/atlas/api/correlate", include_in_schema=False)
+async def correlate_session_upload(
+    bundle: UploadFile | None = File(None),
+    capture: UploadFile | None = File(None),
+    har: UploadFile | None = File(None),
+) -> JSONResponse:
+    """Join a DART bundle, a packet capture and a HAR into one account of a session.
+
+    Every artefact is optional, because a correlation that refuses to run
+    without all three would be useless in the common case where only two were
+    collected. What cannot be answered from what was supplied is reported in
+    ``notes`` rather than left as a gap the reader might mistake for health.
+
+    Uploads are written to a temporary directory that is deleted when the
+    request finishes. Nothing is retained: a capture and a bundle together
+    identify an endpoint and, with a key log, would decrypt the session they
+    recorded.
+    """
+    import shutil
+    import tempfile
+
+    from atlas_core.flows import (
+        as_payload,
+        correlate_session,
+        extract_agent_flows,
+        extract_web_requests,
+        extract_wire_flows,
+        find_zta_log,
+        unpack_bundle,
+    )
+
+    if not any((bundle, capture, har)):
+        return JSONResponse(
+            {"error": "Supply at least one of a DART bundle, a packet capture or a HAR."},
+            status_code=400,
+        )
+
+    work = tempfile.mkdtemp(prefix="atlas-correlate-")
+    try:
+        sources: dict[str, str] = {}
+        notes: list[str] = []
+
+        async def _spill(upload: UploadFile | None, fallback: str) -> str | None:
+            if upload is None:
+                return None
+            name = os.path.basename(upload.filename or fallback)
+            path = os.path.join(work, name)
+            with open(path, "wb") as handle:
+                shutil.copyfileobj(upload.file, handle)
+            return path
+
+        wire_flows = []
+        capture_path = await _spill(capture, "capture.pcapng")
+        if capture_path:
+            sources["capture"] = os.path.basename(capture_path)
+            try:
+                wire_flows = extract_wire_flows(capture_path)
+            except Exception as exc:  # noqa: BLE001 - one unreadable input must not lose the rest
+                notes.append(f"The capture could not be read: {exc}")
+
+        agent_flows = []
+        bundle_path = await _spill(bundle, "bundle.zip")
+        if bundle_path:
+            sources["bundle"] = os.path.basename(bundle_path)
+            try:
+                unpacked = unpack_bundle(bundle_path, os.path.join(work, "bundle"))
+                zta_log = find_zta_log(unpacked)
+                if zta_log:
+                    agent_flows = extract_agent_flows(zta_log)
+                else:
+                    notes.append(
+                        "The bundle holds no Zero Trust Access log, so the agent's own account "
+                        "of these connections is not available."
+                    )
+            except Exception as exc:  # noqa: BLE001
+                notes.append(f"The bundle could not be read: {exc}")
+
+        web_requests = []
+        har_path = await _spill(har, "session.har")
+        if har_path:
+            sources["har"] = os.path.basename(har_path)
+            try:
+                web_requests = extract_web_requests(har_path)
+            except Exception as exc:  # noqa: BLE001
+                notes.append(f"The HAR could not be read: {exc}")
+
+        result = correlate_session(wire_flows, agent_flows, web_requests)
+        result.sources = sources
+        result.notes = notes + result.notes
+        return JSONResponse(as_payload(result))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 app.mount("/capture", capture_app)
 app.mount("/bundle", WSGIMiddleware(darthawk_wsgi_app))
 

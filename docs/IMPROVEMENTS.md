@@ -26,16 +26,20 @@ first instinct is to reload - which throws away the work and starts it again.
 
 **Options, cheapest first.**
 
-1. **Say what is happening.** Report which check is running and how many remain.
-   Costs nothing but a progress channel, and removes the ambiguity entirely.
-   This alone probably closes the complaint.
-2. **Do the CPU-bound work off the event loop** in a process pool, so the two
+1. ~~**Say what is happening.**~~ **Done.** The notice names what is in flight
+   and ticks an elapsed time, so a long run is no longer indistinguishable from
+   a hang. It is not per-check progress - it does not say *which* check is
+   running or how many remain - so the wait is still opaque, only visibly
+   alive.
+2. **Report real progress**, check by check, which needs a progress channel
+   from the server rather than a client-side timer.
+3. **Do the CPU-bound work off the event loop** in a process pool, so the two
    analyses genuinely run in parallel rather than contending.
-3. **Stream results as they arrive** instead of one response at the end.
+4. **Stream results as they arrive** instead of one response at the end.
 
-**Recommendation:** do (1) first and measure whether anyone still complains.
-(2) is the real fix but a much larger change, and it is worth knowing whether
-the problem is the duration or the silence before paying for it.
+**Recommendation:** measure whether the elapsed-time notice alone closes the
+complaint before paying for (3). It is the real fix but a much larger change,
+and it is worth knowing whether the problem was the duration or the silence.
 
 ---
 

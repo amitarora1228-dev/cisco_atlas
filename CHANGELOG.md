@@ -20,6 +20,13 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **A running analysis now says it is still running.** The notice was written
+  once - "This can take a minute" - and then never changed, so a two-to-three
+  minute concurrent run was indistinguishable from a hang. It has been reported
+  as one three times. The notice now names what is in flight and ticks an
+  elapsed time. That is not progress and does not claim to be; it shows the run
+  is alive. Verified: 0:02 through 0:24 on a bundle-only run, cleared when the
+  results rendered.
 - **Flow-level correlation across a DART bundle, a packet capture and a HAR**
   (`packages/atlas_core/atlas_core/flows.py`, `POST /atlas/api/correlate`).
   Joins the three artefacts into one session view: which hostnames were steered

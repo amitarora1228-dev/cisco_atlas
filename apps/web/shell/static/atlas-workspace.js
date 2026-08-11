@@ -759,6 +759,47 @@
         }
     }
 
+    /* Say that work is still happening, and for how long.
+     *
+     * The notice used to be written once - "This can take a minute" - and then
+     * never changed. Both analyses are CPU-bound in one process and serialise,
+     * so a capture and a bundle together take two to three minutes where the
+     * bundle alone takes about thirty seconds. A static message across that
+     * wait is indistinguishable from a hang, and has been reported as one
+     * three times. A ticking elapsed time is not progress, and does not claim
+     * to be: it only shows the run is alive and names what is still in flight.
+     */
+    var pendingWork = {};
+    var workTimer = null;
+    var workStarted = 0;
+
+    function startWork(name) {
+        pendingWork[name] = true;
+        if (workTimer) return;
+        workStarted = Date.now();
+        var tick = function () {
+            var names = Object.keys(pendingWork);
+            if (!names.length) return;
+            var seconds = Math.round((Date.now() - workStarted) / 1000);
+            var clock = Math.floor(seconds / 60) + ":"
+                + ("0" + (seconds % 60)).slice(-2);
+            announce(
+                "Analysing " + names.join(" and ") + " - " + clock + " elapsed. "
+                    + "Analyses share one process, so several together take longer than "
+                    + "each would alone."
+            );
+        };
+        tick();
+        workTimer = window.setInterval(tick, 1000);
+    }
+
+    function endWork(name) {
+        delete pendingWork[name];
+        if (Object.keys(pendingWork).length) return;
+        if (workTimer) window.clearInterval(workTimer);
+        workTimer = null;
+    }
+
     function analyzeEntireBundle() {
         var input = scoped(BUNDLE, "#dartFile");
         if (!input || !input.files || !input.files.length) return;
@@ -767,12 +808,14 @@
         body.append("file", input.files[0]);
 
         announce("Analysing everything in the bundle. This can take a minute.");
+        startWork("the bundle");
 
         // One upload; the server runs every check in-process. Driving the matrix
         // from here would re-send the archive once per check.
         fetch("/atlas/api/bundle/analyze-all", { method: "POST", body: body })
             .then(function (res) { return res.json(); })
             .then(function (data) {
+                endWork("the bundle");
                 renderBundleResults(data.results || [], data.excluded || []);
                 renderReportView();
                 // Analyze does not steal the view, because doing so used to hide
@@ -791,6 +834,7 @@
                 }
             })
             .catch(function (e) {
+                endWork("the bundle");
                 announce("The bundle could not be analysed: " + e);
             });
     }
@@ -877,6 +921,7 @@
             "Correlating " + names.join(" + ") + ". Open Correlation in the rail "
                 + "for what they say about each other."
         );
+        startWork("the correlation");
         runCorrelation(correlateRun, correlateStatus, true);
     }
 
@@ -1281,6 +1326,7 @@
             })
             .then(function (data) {
                 var supplied = Object.keys(data.sources || {});
+                if (notify) endWork("the correlation");
                 status.textContent = "Correlated " + (supplied.length || 0)
                     + " artefact(s): " + (supplied.join(", ") || "none");
                 lastCorrelation = data;
@@ -1298,6 +1344,7 @@
                 }
             })
             .catch(function (err) {
+                if (notify) endWork("the correlation");
                 status.textContent = err.message || "Correlation failed.";
                 if (notify) announce("Correlation failed: " + (err.message || "unknown error"));
             })

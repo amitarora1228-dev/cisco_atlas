@@ -957,3 +957,35 @@ body.atlas-workspace .layout {
     flex-direction: column;
     gap: 4px;
 }
+
+/* --- workspace report -------------------------------------------------- */
+
+.atlas-report-part {
+    border: 1px solid var(--atlas-border);
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface);
+    margin-bottom: 8px;
+}
+
+.atlas-report-part > summary {
+    cursor: pointer;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-report-part > pre {
+    margin: 0;
+    padding: 12px;
+    max-height: 420px;
+    overflow: auto;
+    border-top: 1px solid var(--atlas-border);
+    background: var(--atlas-surface-sunken);
+    font-family: var(--atlas-font-mono, monospace);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--atlas-text);
+}

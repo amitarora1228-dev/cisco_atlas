@@ -493,6 +493,173 @@
         }
     }
 
+    /* ---- one report for the whole workspace ------------------------------ */
+
+    /* Both engines shipped their own exporter, and under ATLAS neither could
+     * see the whole picture: the bundle engine's wrote a header and then
+     * "(no detailed output captured)", because it reads its own raw-text pane
+     * while the whole-bundle analysis renders into the shell's results block.
+     *
+     * There is already a Report view, so rather than add a third exporter the
+     * shell contributes the sections the capture engine cannot know about and
+     * rebinds the existing Download button. Everything is read from the DOM at
+     * the moment of export, so the report can never describe a different run
+     * than the one on screen.
+     */
+    var lastCorrelation = null;
+
+    function reportSections() {
+        var sections = [];
+
+        var raw = document.querySelector("#" + CAPTURE + " #report .rp-raw pre");
+        if (raw && raw.textContent.trim()) {
+            sections.push(["Traffic capture", raw.textContent.trim()]);
+        }
+
+        var bundle = document.getElementById("atlas-bundle-results");
+        if (bundle && bundle.innerText.trim()) {
+            sections.push(["Endpoint bundle", bundle.innerText.trim()]);
+        }
+
+        if (lastCorrelation) {
+            sections.push(["Across artefacts", correlationReportText(lastCorrelation)]);
+        }
+        return sections;
+    }
+
+    function correlationReportText(data) {
+        var lines = [];
+        var summary = data.summary || {};
+        Object.keys(summary).forEach(function (key) {
+            lines.push("  " + key.replace(/_/g, " ") + ": " + summary[key]);
+        });
+        if (data.clock && data.clock.basis) {
+            lines.push("", "Clock offset");
+            lines.push("  " + (data.clock.offset_seconds === null
+                ? "not measured"
+                : "at most " + data.clock.offset_seconds + "s"));
+            lines.push("  basis: " + data.clock.basis);
+        }
+
+        var flows = data.flows || [];
+        if (flows.length) {
+            lines.push("", "Intercepted flows, end to end (" + flows.length + ", worst first)");
+            flows.forEach(function (flow) {
+                lines.push("", "  [" + flow.severity + "] " + flow.destination);
+                lines.push("    " + flow.explanation);
+                if (flow.wire_basis) lines.push("    wire  : " + flow.wire_basis);
+                if (flow.tunnel_basis) lines.push("    tunnel: " + flow.tunnel_basis);
+            });
+        }
+
+        (data.hosts || []).forEach(function (host, index) {
+            if (index === 0) lines.push("", "Hosts");
+            lines.push(
+                "  " + host.host + " - " + host.steering
+                    + " (" + host.requests + " request(s), " + host.failures + " failed)"
+            );
+            lines.push("    " + host.basis);
+        });
+
+        // The refusals are half the value. A report that drops them reads more
+        // confident than the evidence behind it.
+        (data.notes || []).forEach(function (note, index) {
+            if (index === 0) lines.push("", "What these inputs could not answer");
+            lines.push("  - " + note);
+        });
+        return lines.join("\n");
+    }
+
+    function buildWorkspaceReport() {
+        var files = correlationFiles();
+        var rule = new Array(72).join("=");
+        var out = [
+            "ATLAS - Cisco endpoint and network diagnostics",
+            rule,
+            "Generated: " + new Date().toISOString(),
+            "",
+            "Evidence analysed",
+        ];
+        // A report that does not say what it was made from cannot be checked.
+        out.push("  capture: " + (files.capture ? files.capture.name : "not supplied"));
+        out.push("  HAR    : " + (files.har ? files.har.name : "not supplied"));
+        out.push("  bundle : " + (files.bundle ? files.bundle.name : "not supplied"));
+
+        var sections = reportSections();
+        if (!sections.length) {
+            out.push("", "No analysis has been run yet, so this report has no content.");
+            return out.join("\n");
+        }
+        sections.forEach(function (pair) {
+            out.push("", rule, pair[0].toUpperCase(), rule, "", pair[1]);
+        });
+        return out.join("\n");
+    }
+
+    function downloadReport() {
+        var text = buildWorkspaceReport();
+        var blob = new Blob([text], { type: "text/plain" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = "atlas-report.txt";
+        link.click();
+        URL.revokeObjectURL(url);
+    }
+
+    /* The engines' own export buttons are kept and redirected rather than
+     * removed: they are where a user already looks, and both were producing a
+     * partial report from the same click. */
+    function wireReport() {
+        [
+            document.querySelector("#" + CAPTURE + " #download"),
+            document.getElementById("exportReportBtn")
+        ].forEach(function (button) {
+            if (!button) return;
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                downloadReport();
+            }, true);
+            button.disabled = false;
+        });
+    }
+
+    /* What is on screen and what is downloaded are built from the same call,
+     * so a report can never promise something the Report view did not show. */
+    function renderReportView() {
+        var section = document.querySelector("#" + CAPTURE + " #sec-report");
+        if (!section) return;
+
+        var host = document.getElementById("atlas-report-extra");
+        if (!host) {
+            host = el("div", "atlas-corr-block");
+            host.id = "atlas-report-extra";
+            section.appendChild(host);
+        }
+        host.innerHTML = "";
+
+        var sections = reportSections().filter(function (pair) {
+            return pair[0] !== "Traffic capture";
+        });
+        if (!sections.length) return;
+
+        host.appendChild(el("h3", null, "Also in this report"));
+        host.appendChild(el(
+            "p",
+            "atlas-corr-blurb",
+            "The capture's own report is above. These sections come from the other "
+                + "artefacts, and the Download button emits all of them together with a "
+                + "record of which files they were made from."
+        ));
+        sections.forEach(function (pair) {
+            var block = el("details", "atlas-report-part");
+            block.appendChild(el("summary", null, pair[0]));
+            block.appendChild(el("pre", null, pair[1]));
+            host.appendChild(block);
+        });
+    }
+
     function analyzeEntireBundle() {
         var input = scoped(BUNDLE, "#dartFile");
         if (!input || !input.files || !input.files.length) return;
@@ -508,6 +675,7 @@
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 renderBundleResults(data.results || [], data.excluded || []);
+                renderReportView();
                 clearNotice();
             })
             .catch(function (e) {
@@ -968,7 +1136,9 @@
                 var supplied = Object.keys(data.sources || {});
                 status.textContent = "Correlated " + (supplied.length || 0)
                     + " artefact(s): " + (supplied.join(", ") || "none");
+                lastCorrelation = data;
                 renderCorrelation(data);
+                renderReportView();
                 // Said again on completion because the bundle engine clears the
                 // notice when its own results land, and a pointer the reader
                 // never saw is the same as no pointer.
@@ -1177,6 +1347,7 @@
         installFetchShim();
         rebuildEvidence();
         wireAnalyze();
+        wireReport();
 
         var layout = el("div", "atlas-layout");
         layout.appendChild(buildRail());

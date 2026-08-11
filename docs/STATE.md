@@ -464,6 +464,16 @@ Every one of these was a real failure here, not a hypothetical.
   places that emit that markup — the engine's own page and `capture_document`
   in the shell, which composes the document itself and never passes through the
   engine's view — now restamp with the file's modification time.
+- **Two engines each shipped their own exporter, and under ATLAS neither could
+  see the whole run.** The bundle engine's wrote a header and then
+  `(no detailed output captured)` - 293 bytes - because `currentReportText()`
+  reads its own `#resultContent` pane while the whole-bundle analysis renders
+  into the shell's `#atlas-bundle-results`. There is now one report: the shell
+  contributes the sections the capture engine cannot know about, and both
+  existing buttons are redirected to it rather than a third being added. It is
+  built from the DOM at the moment of export, so it cannot describe a different
+  run than the one on screen. Measured: 641,914 characters against 293, opening
+  with the filenames of every artefact analysed.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

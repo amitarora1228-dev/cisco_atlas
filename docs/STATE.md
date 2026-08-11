@@ -5,7 +5,7 @@ finish.** It is the one place that says what exists, where each thing stands, an
 what is known to be broken. If it disagrees with any other document, this file is
 right and the other one is stale.
 
-**Last updated:** 2026-08-10 · branch `atlas-architecture` · head `abb33fa`
+**Last updated:** 2026-08-11 · branch `main` · head `10e758e`
 
 ---
 
@@ -88,6 +88,23 @@ rebuilding it:
 
 If you are tempted to move or rewrite an engine's markup: don't. Wrap it.
 
+### Run-everything results view (summary mode)
+
+`renderBundleResults` in `atlas-workspace.js` used to insert its section above the
+bundle engine's own upload page, which stayed visible underneath — two entry
+points stacked on one document, reading as two different tools. It now puts
+`is-summary` on `#atlas-engine-bundle`, and one CSS rule hides every direct child
+except the results section. Nothing is removed or moved, so the engine's form,
+file input and handlers are untouched; the class is dropped again by the
+"Open bundle tool" button, by any rail module proxy, and by the Bundle analysis
+rail entry.
+
+The list itself carries state rather than only text: checks with findings sort
+first and the first one opens, a dot and left border carry severity, and counts
+appear as chips. A check whose text is exactly `No matching logs found.` is
+counted as **nothing found**, not as a finding — calling that a finding would
+claim something the bundle does not show.
+
 ---
 
 ## 3. Running it
@@ -144,6 +161,7 @@ fallback, but PATH is the supported arrangement.
 | One evidence step (PCAP + HAR + DART bundle) | **Done** |
 | One Analyze button driving both engines | **Done** |
 | Run-everything bundle analysis, single upload | **Done** |
+| Run-everything results view (summary mode) | **Done** — see below |
 | Rename to ATLAS (user-facing) | **Done** |
 | Identity join (org ID) in `atlas_core` | **Done**, unproven against a real bundle |
 | Unified findings model | **Not started** — the keystone for Phase 2 |

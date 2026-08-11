@@ -180,6 +180,35 @@
      * of a blanket run. They stay available by selecting the module manually.
      */
 
+    /* The bundle engine's own upload panel is the way *in*; once results exist it
+     * is behind them and reads as a second, contradictory page. Collapse the
+     * engine while the summary is on screen, and give the user an explicit way
+     * back to it. */
+    function setSummaryMode(on) {
+        var root = document.getElementById(BUNDLE);
+        if (root) root.classList.toggle("is-summary", !!on);
+    }
+
+    function statChip(count, label, kind) {
+        var chip = el("span", "atlas-stat" + (kind ? " is-" + kind : ""));
+        chip.appendChild(el("strong", "atlas-stat-count", String(count)));
+        chip.appendChild(el("span", "atlas-stat-label", label));
+        return chip;
+    }
+
+    function currentBundleName() {
+        var input = scoped(BUNDLE, "#dartFile");
+        var file = input && input.files && input.files[0];
+        return file ? file.name : "";
+    }
+
+    /* The engine answers "No matching logs found." as ordinary text. Counting
+     * that as a finding would claim something the bundle does not show. */
+    function hasFinding(r) {
+        if (!r.ok || !r.text) return false;
+        return !/^no matching logs found\.?$/i.test(r.text.trim());
+    }
+
     function renderBundleResults(results, excluded) {
         var host = document.getElementById("atlas-bundle-results");
         if (!host) {
@@ -190,36 +219,84 @@
             );
         }
         host.innerHTML = "";
-        host.appendChild(el("h2", "atlas-results-title", "Endpoint bundle - full analysis"));
+        setSummaryMode(true);
 
-        var answered = results.filter(function (r) { return r.ok && r.text; });
+        var answered = results.filter(hasFinding);
+        var empty = results.filter(function (r) { return r.ok && !hasFinding(r); });
+        var failed = results.filter(function (r) { return !r.ok; });
+        var skipped = excluded || [];
+
+        var head = el("header", "atlas-results-head");
+        var heading = el("div", "atlas-results-heading");
+        heading.appendChild(el("h2", "atlas-results-title", "Endpoint bundle - full analysis"));
+        var name = currentBundleName();
+        if (name) heading.appendChild(el("span", "atlas-results-file", name));
+        head.appendChild(heading);
+
+        var back = el("button", "atlas-results-back", "Open bundle tool");
+        back.type = "button";
+        back.addEventListener("click", function () {
+            setSummaryMode(false);
+            var form = scoped(BUNDLE, "#uploadForm");
+            if (form && form.scrollIntoView) form.scrollIntoView({ block: "start" });
+        });
+        head.appendChild(back);
+        host.appendChild(head);
+
+        var stats = el("div", "atlas-stats");
+        stats.appendChild(statChip(answered.length, "with findings", "ok"));
+        if (empty.length) stats.appendChild(statChip(empty.length, "nothing found", "quiet"));
+        if (failed.length) stats.appendChild(statChip(failed.length, "not applicable", "quiet"));
+        if (skipped.length) stats.appendChild(statChip(skipped.length, "not run", "warn"));
+        host.appendChild(stats);
+
         host.appendChild(el("p", "atlas-results-sub",
-            answered.length + " of " + results.length + " checks returned findings. "
-            + "Checks that need a specific destination or identifier are not included; "
+            "Checks that need a specific destination or identifier are not included; "
             + "select the module in the left panel to run those."));
 
-        results.forEach(function (r) {
-            var box = el("details", "atlas-result" + (r.ok ? "" : " is-error"));
-            var head = document.createElement("summary");
-            head.appendChild(el("span", "atlas-result-name", r.label));
-            head.appendChild(el("span", "atlas-result-state",
-                r.ok ? (r.text ? "answered" : "nothing found") : (r.error || "not applicable")));
-            box.appendChild(head);
-            var body = el("pre", "atlas-result-body", r.text || r.error || "");
-            box.appendChild(body);
-            host.appendChild(box);
+        // Findings first: a check with something to say should not be buried
+        // among the ones that had nothing.
+        var ordered = answered.concat(empty).concat(failed);
+        var list = el("div", "atlas-result-list");
+
+        ordered.forEach(function (r, index) {
+            var hasText = hasFinding(r);
+            var box = el("details", "atlas-result"
+                + (r.ok ? (hasText ? " is-answered" : " is-quiet") : " is-error"));
+            if (hasText && index === 0) box.open = true;
+
+            var summary = document.createElement("summary");
+            summary.appendChild(el("span", "atlas-result-dot"));
+            summary.appendChild(el("span", "atlas-result-name", r.label));
+
+            var meta = el("span", "atlas-result-meta");
+            if (hasText) {
+                var lines = r.text.split("\n").filter(function (l) { return l.trim(); }).length;
+                meta.appendChild(el("span", "atlas-result-lines",
+                    lines + (lines === 1 ? " line" : " lines")));
+            }
+            meta.appendChild(el("span", "atlas-result-state",
+                r.ok ? (hasText ? "findings" : "nothing found") : (r.error || "not applicable")));
+            summary.appendChild(meta);
+            box.appendChild(summary);
+
+            box.appendChild(el("pre", "atlas-result-body", r.text || r.error || ""));
+            list.appendChild(box);
         });
 
         // A skipped check should be a visible choice, not a silent gap.
-        (excluded || []).forEach(function (x) {
+        skipped.forEach(function (x) {
             var box = el("div", "atlas-result is-skipped");
-            var head = el("div", "atlas-result-head");
-            head.appendChild(el("span", "atlas-result-name", x.label));
-            head.appendChild(el("span", "atlas-result-state", "not run"));
-            box.appendChild(head);
+            var row = el("div", "atlas-result-head");
+            row.appendChild(el("span", "atlas-result-dot"));
+            row.appendChild(el("span", "atlas-result-name", x.label));
+            row.appendChild(el("span", "atlas-result-state", "not run"));
+            box.appendChild(row);
             box.appendChild(el("p", "atlas-result-reason", x.reason));
-            host.appendChild(box);
+            list.appendChild(box);
         });
+
+        host.appendChild(list);
     }
 
     function analyzeEntireBundle() {
@@ -273,6 +350,7 @@
                 if (chosen && !needsCheckOption()) {
                     var form = scoped(BUNDLE, "#uploadForm");
                     if (form) {
+                        setSummaryMode(false);
                         form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
                         showEngine(BUNDLE);
                     }
@@ -353,7 +431,10 @@
             + '<path d="M3.3 7L12 12l8.7-5"/><path d="M12 22V12"/>';
         bundleBtn.appendChild(bundleIcon);
         bundleBtn.appendChild(el("span", null, "Bundle analysis"));
-        bundleBtn.addEventListener("click", function () { showEngine(BUNDLE); });
+        bundleBtn.addEventListener("click", function () {
+            setSummaryMode(false);
+            showEngine(BUNDLE);
+        });
         rail.appendChild(bundleBtn);
 
         // The module choice (ZTA, VPN, Umbrella, UZTNA, EDLP) lives inside the
@@ -373,6 +454,7 @@
                 item.addEventListener("click", function () {
                     radio.checked = true;
                     radio.dispatchEvent(new Event("change", { bubbles: true }));
+                    setSummaryMode(false);
                     showEngine(BUNDLE);
                     syncModuleSelection();
                 });

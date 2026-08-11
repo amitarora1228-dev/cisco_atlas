@@ -210,6 +210,87 @@ body.atlas-workspace {
     margin-bottom: 22px;
 }
 
+/* While the summary is on screen the engine's own upload page is hidden: two
+ * entry points stacked on one another read as two different tools. */
+#atlas-engine-bundle.is-summary > *:not(#atlas-bundle-results) {
+    display: none !important;
+}
+
+.atlas-results-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.atlas-results-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.atlas-results-file {
+    font-family: var(--atlas-font-mono);
+    font-size: 0.76rem;
+    color: var(--atlas-text-muted);
+    background: var(--atlas-surface-sunken, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--atlas-border);
+    border-radius: 999px;
+    padding: 2px 10px;
+}
+
+.atlas-results-back {
+    border: 1px solid var(--atlas-border);
+    background: var(--atlas-surface);
+    color: var(--atlas-text-strong);
+    border-radius: var(--atlas-radius-sm);
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.atlas-results-back:hover {
+    border-color: var(--atlas-text-subtle);
+}
+
+.atlas-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 10px;
+}
+
+.atlas-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid var(--atlas-border);
+    border-left: 3px solid var(--atlas-text-subtle);
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface);
+}
+
+.atlas-stat.is-ok {
+    border-left-color: var(--atlas-success);
+}
+
+.atlas-stat.is-warn {
+    border-left-color: var(--atlas-warning);
+}
+
+.atlas-stat-count {
+    font-size: 0.98rem;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-stat-label {
+    font-size: 0.78rem;
+    color: var(--atlas-text-muted);
+}
+
 .atlas-results-title {
     margin: 0 0 4px;
     font-size: 1.16rem;
@@ -223,14 +304,21 @@ body.atlas-workspace {
     color: var(--atlas-text-muted);
 }
 
+.atlas-result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
 .atlas-result {
     background: var(--atlas-surface);
     border: 1px solid var(--atlas-border);
     border-left: 3px solid var(--atlas-success);
     border-radius: var(--atlas-radius-sm);
-    margin-bottom: 8px;
+    margin-bottom: 0;
 }
 
+.atlas-result.is-quiet,
 .atlas-result.is-error {
     border-left-color: var(--atlas-text-subtle);
 }
@@ -240,16 +328,36 @@ body.atlas-workspace {
     padding: 11px 14px;
 }
 
+/* One dot carries the state, so the row does not need colour of its own. */
+.atlas-result-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--atlas-text-subtle);
+}
+
+.atlas-result.is-answered .atlas-result-dot {
+    background: var(--atlas-success);
+}
+
+.atlas-result.is-skipped .atlas-result-dot {
+    background: var(--atlas-warning);
+}
+
 .atlas-result-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 14px;
+    gap: 10px;
     font-size: 0.88rem;
 }
 
+.atlas-result-head .atlas-result-state {
+    margin-left: auto;
+}
+
 .atlas-result-reason {
-    margin: 6px 0 0;
+    margin: 6px 0 0 17px;
     font-size: 0.82rem;
     line-height: 1.5;
     color: var(--atlas-text-muted);
@@ -258,11 +366,32 @@ body.atlas-workspace {
 .atlas-result > summary {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 14px;
+    gap: 10px;
     padding: 11px 14px;
     cursor: pointer;
     font-size: 0.88rem;
+    list-style: none;
+}
+
+.atlas-result > summary::-webkit-details-marker {
+    display: none;
+}
+
+.atlas-result > summary:hover {
+    background: var(--atlas-surface-sunken, rgba(0, 0, 0, 0.02));
+}
+
+.atlas-result-meta {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.atlas-result-lines {
+    font-family: var(--atlas-font-mono);
+    font-size: 0.72rem;
+    color: var(--atlas-text-subtle);
 }
 
 .atlas-result-name {
@@ -277,8 +406,10 @@ body.atlas-workspace {
 }
 
 .atlas-result-body {
-    margin: 0;
-    padding: 0 14px 14px;
+    margin: 0 14px 14px 24px;
+    padding: 12px;
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface-sunken, rgba(0, 0, 0, 0.03));
     font-family: var(--atlas-font-mono);
     font-size: 0.78rem;
     line-height: 1.5;

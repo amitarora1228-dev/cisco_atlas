@@ -189,13 +189,6 @@
         if (root) root.classList.toggle("is-summary", !!on);
     }
 
-    function statChip(count, label, kind) {
-        var chip = el("span", "atlas-stat" + (kind ? " is-" + kind : ""));
-        chip.appendChild(el("strong", "atlas-stat-count", String(count)));
-        chip.appendChild(el("span", "atlas-stat-label", label));
-        return chip;
-    }
-
     function currentBundleName() {
         var input = scoped(BUNDLE, "#dartFile");
         var file = input && input.files && input.files[0];
@@ -207,6 +200,72 @@
     function hasFinding(r) {
         if (!r.ok || !r.text) return false;
         return !/^no matching logs found\.?$/i.test(r.text.trim());
+    }
+
+    /* Output means opposite things depending on what the check asked, so the
+     * groups are ordered by how much a reader should care, and each says what
+     * its own output signifies. The server tags every result with its kind. */
+    var GROUPS = [
+        {
+            kind: "errors",
+            title: "Problems reported",
+            blurb: "These checks only report failures. Output here means something went wrong.",
+            withText: "reported",
+            withoutText: "none reported"
+        },
+        {
+            kind: "mixed",
+            title: "Status - read these",
+            blurb: "These report status and errors together, so they produce output even on "
+                + "a healthy client. Output here is not itself a fault; the text has to be read.",
+            withText: "reported",
+            withoutText: "nothing reported"
+        },
+        {
+            kind: "state",
+            title: "Configuration and state",
+            blurb: "What the client is set to and the state it was in. Output here is expected, not a fault.",
+            withText: "recorded",
+            withoutText: "nothing recorded"
+        },
+        {
+            kind: "logs",
+            title: "Raw log excerpts",
+            blurb: "Log text carried through as-is, for reading rather than for judging.",
+            withText: "available",
+            withoutText: "empty"
+        }
+    ];
+
+    function lineCount(text) {
+        return text.split("\n").filter(function (l) { return l.trim(); }).length;
+    }
+
+    function resultRow(r, group, open) {
+        var found = hasFinding(r);
+        var box = el("details", "atlas-result"
+            + (r.ok ? (found ? " is-answered" : " is-quiet") : " is-error")
+            + " is-" + group.kind);
+        if (open) box.open = true;
+
+        var summary = document.createElement("summary");
+        // The module is already the group's heading; repeating it on every row
+        // pushes the distinguishing word out of the scan column.
+        summary.appendChild(el("span", "atlas-result-name",
+            r.label.replace(/^ZTA - /, "")));
+
+        var meta = el("span", "atlas-result-meta");
+        if (found) {
+            meta.appendChild(el("span", "atlas-result-lines", lineCount(r.text) + " lines"));
+        }
+        meta.appendChild(el("span", "atlas-result-state",
+            r.ok ? (found ? group.withText : group.withoutText)
+                 : (r.error || "not applicable")));
+        summary.appendChild(meta);
+        box.appendChild(summary);
+
+        box.appendChild(el("pre", "atlas-result-body", r.text || r.error || ""));
+        return box;
     }
 
     function renderBundleResults(results, excluded) {
@@ -221,10 +280,10 @@
         host.innerHTML = "";
         setSummaryMode(true);
 
-        var answered = results.filter(hasFinding);
-        var empty = results.filter(function (r) { return r.ok && !hasFinding(r); });
-        var failed = results.filter(function (r) { return !r.ok; });
         var skipped = excluded || [];
+        var problems = results.filter(function (r) {
+            return r.kind === "errors" && hasFinding(r);
+        });
 
         var head = el("header", "atlas-results-head");
         var heading = el("div", "atlas-results-heading");
@@ -243,60 +302,77 @@
         head.appendChild(back);
         host.appendChild(head);
 
-        var stats = el("div", "atlas-stats");
-        stats.appendChild(statChip(answered.length, "with findings", "ok"));
-        if (empty.length) stats.appendChild(statChip(empty.length, "nothing found", "quiet"));
-        if (failed.length) stats.appendChild(statChip(failed.length, "not applicable", "quiet"));
-        if (skipped.length) stats.appendChild(statChip(skipped.length, "not run", "warn"));
-        host.appendChild(stats);
+        // The one question worth answering above everything else. It counts only
+        // the checks that report failures, so it cannot be inflated by a config
+        // dump, and it says which checks - not just how many.
+        var verdict = el("div", "atlas-verdict" + (problems.length ? " is-flagged" : " is-clear"));
+        if (problems.length) {
+            verdict.appendChild(el("strong", "atlas-verdict-title",
+                problems.length === 1
+                    ? "1 check reported a problem"
+                    : problems.length + " checks reported problems"));
+            verdict.appendChild(el("span", "atlas-verdict-detail",
+                problems.map(function (r) { return r.label.replace(/^ZTA - /, ""); }).join(" · ")));
+        } else {
+            verdict.appendChild(el("strong", "atlas-verdict-title",
+                "No problems reported"));
+            verdict.appendChild(el("span", "atlas-verdict-detail",
+                "The checks that report only failures found nothing. That is not proof "
+                + "the endpoint is healthy - the status checks below can still carry "
+                + "errors in their text, and nothing here judges them."));
+        }
+        host.appendChild(verdict);
 
-        host.appendChild(el("p", "atlas-results-sub",
-            "Checks that need a specific destination or identifier are not included; "
-            + "select the module in the left panel to run those."));
+        GROUPS.forEach(function (group) {
+            var mine = results.filter(function (r) { return r.kind === group.kind; });
+            if (!mine.length) return;
 
-        // Findings first: a check with something to say should not be buried
-        // among the ones that had nothing.
-        var ordered = answered.concat(empty).concat(failed);
-        var list = el("div", "atlas-result-list");
+            var found = mine.filter(hasFinding);
+            var rest = mine.filter(function (r) { return !hasFinding(r); });
 
-        ordered.forEach(function (r, index) {
-            var hasText = hasFinding(r);
-            var box = el("details", "atlas-result"
-                + (r.ok ? (hasText ? " is-answered" : " is-quiet") : " is-error"));
-            if (hasText && index === 0) box.open = true;
+            var section = el("section", "atlas-group is-" + group.kind);
+            var gh = el("header", "atlas-group-head");
+            gh.appendChild(el("h3", "atlas-group-title", group.title));
+            gh.appendChild(el("span", "atlas-group-count",
+                found.length + " of " + mine.length));
+            section.appendChild(gh);
+            section.appendChild(el("p", "atlas-group-blurb", group.blurb));
 
-            var summary = document.createElement("summary");
-            summary.appendChild(el("span", "atlas-result-dot"));
-            summary.appendChild(el("span", "atlas-result-name", r.label));
-
-            var meta = el("span", "atlas-result-meta");
-            if (hasText) {
-                var lines = r.text.split("\n").filter(function (l) { return l.trim(); }).length;
-                meta.appendChild(el("span", "atlas-result-lines",
-                    lines + (lines === 1 ? " line" : " lines")));
-            }
-            meta.appendChild(el("span", "atlas-result-state",
-                r.ok ? (hasText ? "findings" : "nothing found") : (r.error || "not applicable")));
-            summary.appendChild(meta);
-            box.appendChild(summary);
-
-            box.appendChild(el("pre", "atlas-result-body", r.text || r.error || ""));
-            list.appendChild(box);
+            var list = el("div", "atlas-result-list");
+            // Within a group, a check with something to say comes first; only a
+            // problem is worth opening unasked.
+            found.concat(rest).forEach(function (r, i) {
+                list.appendChild(resultRow(r, group, group.kind === "errors" && i === 0
+                    && hasFinding(r)));
+            });
+            section.appendChild(list);
+            host.appendChild(section);
         });
 
         // A skipped check should be a visible choice, not a silent gap.
-        skipped.forEach(function (x) {
-            var box = el("div", "atlas-result is-skipped");
-            var row = el("div", "atlas-result-head");
-            row.appendChild(el("span", "atlas-result-dot"));
-            row.appendChild(el("span", "atlas-result-name", x.label));
-            row.appendChild(el("span", "atlas-result-state", "not run"));
-            box.appendChild(row);
-            box.appendChild(el("p", "atlas-result-reason", x.reason));
-            list.appendChild(box);
-        });
+        if (skipped.length) {
+            var sk = el("section", "atlas-group is-skipped");
+            var skh = el("header", "atlas-group-head");
+            skh.appendChild(el("h3", "atlas-group-title", "Not run"));
+            skh.appendChild(el("span", "atlas-group-count", String(skipped.length)));
+            sk.appendChild(skh);
+            sk.appendChild(el("p", "atlas-group-blurb",
+                "These need a specific destination or identifier. Select the module "
+                + "in the left panel to run them."));
 
-        host.appendChild(list);
+            var skl = el("div", "atlas-result-list");
+            skipped.forEach(function (x) {
+                var box = el("div", "atlas-result is-skipped");
+                var row = el("div", "atlas-result-head");
+                row.appendChild(el("span", "atlas-result-name", x.label));
+                row.appendChild(el("span", "atlas-result-state", "not run"));
+                box.appendChild(row);
+                box.appendChild(el("p", "atlas-result-reason", x.reason));
+                skl.appendChild(box);
+            });
+            sk.appendChild(skl);
+            host.appendChild(sk);
+        }
     }
 
     function analyzeEntireBundle() {

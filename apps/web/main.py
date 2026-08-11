@@ -115,19 +115,48 @@ def healthz() -> dict:
 #   identifier from the user.
 #
 # All of them remain available by selecting the module manually.
-_BUNDLE_MATRIX: list[tuple[str, dict]] = [
-    (f"ZTA - {check.removeprefix('Check ')}",
+#
+# Each check is tagged with the *kind of question it asks*, because output means
+# opposite things depending on that. An error check that produced text is
+# reporting failures; a state check that produced text is reporting the
+# configuration it found, which is normal. Presenting both as "findings" made a
+# fault and a settings dump look identical.
+#
+# The tag describes the check, not the bundle, so it asserts nothing about the
+# data - it is fixed at the same place the check is declared.
+#
+# The tags below were checked against engine output rather than guessed from the
+# check names, and two names proved misleading:
+#
+# * "Check Configuration Sync" sounds like an error check but returns a
+#   statistics report (request/response counts, "Failures since last successful
+#   sync: 0"). It produces output on a healthy client.
+# * "Check Server Connectivity Errors" always prints a status preamble
+#   ("Proxy Connectivity: Ok", flow counts) before any error lines, so it too
+#   produces output on a healthy client.
+#
+# Both are therefore _MIXED: the presence of output proves nothing, and only
+# reading the text distinguishes a fault from a normal report. Counting them as
+# problems would have made ATLAS claim failures the engine never reported.
+_ERRORS = "errors"
+_MIXED = "mixed"
+_STATE = "state"
+_LOGS = "logs"
+
+_BUNDLE_MATRIX: list[tuple[str, str, dict]] = [
+    (f"ZTA - {check.removeprefix('Check ')}", kind,
      {"module": "ZTA", "zta_access_mode": "SPA", "spa_check_option": check})
-    for check in (
-        "Check Enrollment Errors",
-        "Check Configuration Sync",
-        "Check Server Connectivity Errors",
-        "Check Trusted Network Detection",
-        "Check User Pause Config",
-        "Check Inclusions or Exclusions",
-        "Check Event Viewer Logs",
+    for check, kind in (
+        ("Check Enrollment Errors", _ERRORS),
+        ("Check Configuration Sync", _MIXED),
+        ("Check Server Connectivity Errors", _MIXED),
+        ("Check Trusted Network Detection", _STATE),
+        ("Check User Pause Config", _STATE),
+        ("Check Inclusions or Exclusions", _STATE),
+        ("Check Event Viewer Logs", _LOGS),
     )
-] + [("Duo Desktop", {"module": "Duo Desktop"})]
+] + [("Duo Desktop", _STATE, {"module": "Duo Desktop"})]
+
 
 # Surfaced to the user so an excluded check is a visible choice, not a silent gap.
 _BUNDLE_EXCLUDED: list[dict] = []
@@ -152,7 +181,7 @@ async def analyze_entire_bundle(file: UploadFile = File(...)) -> JSONResponse:
     name = file.filename or "bundle.zip"
     results = []
 
-    for label, fields in _BUNDLE_MATRIX:
+    for label, kind, fields in _BUNDLE_MATRIX:
         data = dict(fields)
         data["file"] = (io.BytesIO(payload), name)
         try:
@@ -163,12 +192,15 @@ async def analyze_entire_bundle(file: UploadFile = File(...)) -> JSONResponse:
                 body = response.get_json(silent=True) or {}
                 results.append({
                     "label": label,
+                    "kind": kind,
                     "ok": response.status_code == 200,
                     "text": (body.get("details") or "").strip(),
                     "error": body.get("error"),
                 })
         except Exception as exc:  # noqa: BLE001 - one failing check must not lose the rest
-            results.append({"label": label, "ok": False, "text": "", "error": str(exc)})
+            results.append(
+                {"label": label, "kind": kind, "ok": False, "text": "", "error": str(exc)}
+            )
 
     return JSONResponse({"results": results, "excluded": _BUNDLE_EXCLUDED})
 

@@ -255,39 +255,67 @@ body.atlas-workspace {
     border-color: var(--atlas-text-subtle);
 }
 
-.atlas-stats {
+/* The single answer to "did anything go wrong". Only the checks that report
+ * failures can put this into its flagged state, so a large configuration dump
+ * cannot inflate it. */
+.atlas-verdict {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 12px 0 10px;
-}
-
-.atlas-stat {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 6px;
-    padding: 5px 11px;
+    flex-direction: column;
+    gap: 3px;
+    margin: 14px 0 4px;
+    padding: 12px 15px;
     border: 1px solid var(--atlas-border);
     border-left: 3px solid var(--atlas-text-subtle);
     border-radius: var(--atlas-radius-sm);
     background: var(--atlas-surface);
 }
 
-.atlas-stat.is-ok {
-    border-left-color: var(--atlas-success);
-}
-
-.atlas-stat.is-warn {
+.atlas-verdict.is-flagged {
     border-left-color: var(--atlas-warning);
 }
 
-.atlas-stat-count {
+.atlas-verdict-title {
     font-size: 0.98rem;
     color: var(--atlas-text-strong);
 }
 
-.atlas-stat-label {
+.atlas-verdict-detail {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--atlas-text-muted);
+}
+
+/* Groups, not one flat list: output means a fault in one group and ordinary
+ * configuration in another, so they are not peers and should not look it. */
+.atlas-group {
+    margin-top: 22px;
+}
+
+.atlas-group-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.atlas-group-title {
+    margin: 0;
     font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-group-count {
+    font-family: var(--atlas-font-mono);
+    font-size: 0.72rem;
+    color: var(--atlas-text-subtle);
+}
+
+.atlas-group-blurb {
+    margin: 4px 0 10px;
+    font-size: 0.82rem;
+    line-height: 1.5;
     color: var(--atlas-text-muted);
 }
 
@@ -296,12 +324,6 @@ body.atlas-workspace {
     font-size: 1.16rem;
     font-weight: 600;
     color: var(--atlas-text-strong);
-}
-
-.atlas-results-sub {
-    margin: 0 0 16px;
-    font-size: 0.85rem;
-    color: var(--atlas-text-muted);
 }
 
 .atlas-result-list {
@@ -313,36 +335,20 @@ body.atlas-workspace {
 .atlas-result {
     background: var(--atlas-surface);
     border: 1px solid var(--atlas-border);
-    border-left: 3px solid var(--atlas-success);
     border-radius: var(--atlas-radius-sm);
     margin-bottom: 0;
 }
 
-.atlas-result.is-quiet,
-.atlas-result.is-error {
-    border-left-color: var(--atlas-text-subtle);
+/* Only a check that reports failures earns the warning accent, and only when it
+ * actually reported one. Mixed checks emit status text on a healthy client, so
+ * accenting them would assert a fault the engine never claimed. */
+.atlas-result.is-errors.is-answered {
+    border-left: 3px solid var(--atlas-warning);
 }
 
 .atlas-result.is-skipped {
-    border-left-color: var(--atlas-warning);
+    border-left: 3px solid var(--atlas-text-subtle);
     padding: 11px 14px;
-}
-
-/* One dot carries the state, so the row does not need colour of its own. */
-.atlas-result-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex: none;
-    background: var(--atlas-text-subtle);
-}
-
-.atlas-result.is-answered .atlas-result-dot {
-    background: var(--atlas-success);
-}
-
-.atlas-result.is-skipped .atlas-result-dot {
-    background: var(--atlas-warning);
 }
 
 .atlas-result-head {

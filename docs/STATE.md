@@ -99,11 +99,33 @@ file input and handlers are untouched; the class is dropped again by the
 "Open bundle tool" button, by any rail module proxy, and by the Bundle analysis
 rail entry.
 
-The list itself carries state rather than only text: checks with findings sort
-first and the first one opens, a dot and left border carry severity, and counts
-appear as chips. A check whose text is exactly `No matching logs found.` is
-counted as **nothing found**, not as a finding — calling that a finding would
-claim something the bundle does not show.
+The list itself is grouped by **the question each check asks**, because output
+means opposite things across checks and a flat list of eight equal rows let a
+2 812-line statistics dump and a 17-line setting read identically. The server
+tags every check in `_BUNDLE_MATRIX` with a kind, fixed beside the declaration,
+so the tag describes the check and asserts nothing about the bundle:
+
+| Kind | Checks | Output means |
+|---|---|---|
+| `errors` | Enrollment Errors | a failure was reported |
+| `mixed` | Configuration Sync, Server Connectivity Errors | nothing on its own - read the text |
+| `state` | TND, User Pause, Inclusions/Exclusions, Duo Desktop | the configuration found |
+| `logs` | Event Viewer Logs | log text carried through as-is |
+
+**The two `mixed` entries are the trap.** Both are named like error checks and
+were first tagged as such. Checked against a real bundle, neither is:
+Configuration Sync returns a statistics report (100 requests, 100 successful,
+`Failures since last successful sync: 0`) and Server Connectivity Errors always
+prints `Proxy Connectivity: Ok` plus flow counts before any error lines. Both
+produce output on a healthy client, so counting them would have made the verdict
+banner announce "2 checks reported problems" on a bundle where none were
+reported. Do not re-tag a check from its name - run it and read the output.
+
+The verdict banner counts `errors` only, and when clear it says so without
+claiming health. A check whose text is exactly `No matching logs found.` is
+counted as **nothing found**, not as a finding. Only an `errors` check that
+actually reported something gets a coloured accent or opens unasked; line counts
+measure verbosity, not importance, so they are muted rather than headlined.
 
 ---
 

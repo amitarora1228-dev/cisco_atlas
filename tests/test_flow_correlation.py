@@ -329,3 +329,117 @@ def test_a_missing_artefact_is_recorded_rather_than_glossed_over(missing):
     result = correlate_session(wire, agent, har)
 
     assert result.notes, f"a missing {missing} produced no note"
+
+
+# --- host-named app flows --------------------------------------------------
+#
+# The agent writes a second, differently punctuated identifier for the flow
+# between the application and its own listener, naming the destination the
+# application asked for. It is the only place any artefact states both a
+# recognisable destination and the source port that leads into the capture.
+
+_APP_LOG = """\
+2026-08-10 17:19:53.863412 csc_zta_agent[0x1244/T, 0xda0] E/ AppSocketTransport.cpp:245 \
+AppSocketTransport::handleConnectTimeout() tcp:50231__www.example.com 1C0226C8 stream=85 connect timeout
+2026-08-10 17:19:53.863500 csc_zta_agent[0x1244/T, 0xda0] I/ Http2MuxTransport.cpp:1220 \
+Http2MuxTransport::handleNghttp2StreamCloseCB() http2_50300__198.51.100.7:443 15D54BAC stream=85 code=5
+2026-08-10 17:19:53.864430 csc_zta_agent[0x1244/T, 0xda0] E/ AppSocketTransport.cpp:1002 \
+AppSocketTransport::handleClose() tcp:50231__www.example.com 1C0226C8 stream=85 closing due to reason: connect_timeout
+"""
+
+
+def _write(tmp_path, text: str) -> str:
+    path = tmp_path / "ZeroTrustAccess.txt"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_app_flow_records_destination_port_stream_and_reason(tmp_path):
+    from atlas_core.flows import extract_app_flows
+
+    flows = extract_app_flows(_write(tmp_path, _APP_LOG))
+    assert len(flows) == 1
+    flow = flows[0]
+    assert flow.dest == "www.example.com"
+    assert flow.src_port == 50231
+    assert flow.stream == 85
+    assert flow.reasons == ("connect_timeout",)
+    assert flow.error_lines == 2
+    assert flow.label == "tcp:50231__www.example.com"
+
+
+def test_app_flow_is_not_confused_with_the_tunnel_identifier(tmp_path):
+    """The two identifiers differ only in punctuation; both must be read."""
+    from atlas_core.flows import extract_app_flows
+
+    path = _write(tmp_path, _APP_LOG)
+    app = extract_app_flows(path)
+    tunnels = extract_agent_flows(path)
+    assert [f.dest for f in app] == ["www.example.com"]
+    assert [t.label for t in tunnels] == ["http2_50300__198.51.100.7:443"]
+
+
+def test_flow_is_followed_from_destination_through_port_to_the_wire(tmp_path):
+    from atlas_core.flows import extract_app_flows
+
+    path = _write(tmp_path, _APP_LOG)
+    wire = _wire(1, 50231, "127.0.0.1", src_ip="127.0.0.1", dst_port=52555)
+    session = correlate_session(
+        [wire],
+        extract_agent_flows(path),
+        [WebRequest("https://www.example.com/", "www.example.com", "GET", 502, None, None, None)],
+        extract_app_flows(path),
+    )
+    assert len(session.flows) == 1
+    flow = session.flows[0]
+    assert flow.wire is wire
+    assert flow.wire_strength is JoinStrength.EXACT
+    assert flow.tunnel is not None and flow.tunnel.label == "http2_50300__198.51.100.7:443"
+    assert len(flow.failures) == 1
+    assert flow.severity == "problem"
+
+
+def test_a_reused_source_port_refuses_the_wire_join_and_says_so(tmp_path):
+    """Two captured flows from one port cannot both be this flow."""
+    from atlas_core.flows import extract_app_flows
+
+    path = _write(tmp_path, _APP_LOG)
+    session = correlate_session(
+        [_wire(1, 50231, "127.0.0.1", src_ip="127.0.0.1", dst_port=52555),
+         _wire(2, 50231, "203.0.113.9")],
+        extract_agent_flows(path),
+        [],
+        extract_app_flows(path),
+    )
+    flow = session.flows[0]
+    assert flow.wire is None
+    assert "cannot be told" in flow.wire_basis
+    assert any("same source port" in n for n in session.notes)
+
+
+def test_the_error_only_caveat_is_always_stated(tmp_path):
+    """A short list must never be read as a clean bill of health."""
+    from atlas_core.flows import as_payload, extract_app_flows
+
+    path = _write(tmp_path, _APP_LOG)
+    session = correlate_session([], extract_agent_flows(path), [], extract_app_flows(path))
+    payload = as_payload(session)
+    assert payload["summary"]["intercepted_flows"] == 1
+    assert any("not one that is known to have worked" in n for n in payload["notes"])
+
+
+def test_explanation_cites_each_artefact_it_used(tmp_path):
+    from atlas_core.flows import as_payload, extract_app_flows
+
+    path = _write(tmp_path, _APP_LOG)
+    session = correlate_session(
+        [_wire(1, 50231, "127.0.0.1", src_ip="127.0.0.1", dst_port=52555)],
+        extract_agent_flows(path),
+        [WebRequest("https://www.example.com/", "www.example.com", "GET", 200, None, None, None)],
+        extract_app_flows(path),
+    )
+    flow = as_payload(session)["flows"][0]
+    assert "www.example.com" in flow["explanation"]
+    assert "50231" in flow["explanation"]
+    assert "connect_timeout" in flow["explanation"]
+    assert {e["source"] for e in flow["evidence"]} == {"bundle", "capture", "har"}

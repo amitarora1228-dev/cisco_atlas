@@ -784,16 +784,20 @@ function buildRows(data) {
     });
   });
 
-  // HAR failed entries
+  // HAR entries. Every request the browser made is listed; the "Show only
+  // problems" control does the filtering, so a successful request is visible
+  // as the evidence it is rather than being dropped before it reaches here.
   (data.har_entries || []).forEach((h) => {
-    const sev =
-      h.category === "cert_trust" || h.category === "public_cert" || h.category === "pinning_signal" || h.category === "proxy"
+    const failed = h.failed !== false;
+    const sev = !failed
+      ? "ok"
+      : (h.category === "cert_trust" || h.category === "public_cert" || h.category === "pinning_signal" || h.category === "proxy"
         ? "high"
-        : "medium";
+        : "medium");
     rows.push({
       kind: "har",
       sev,
-      problem: true,
+      problem: failed,
       time: h.time,
       src: "browser",
       dst: h.server_ip || "—",
@@ -803,7 +807,7 @@ function buildRows(data) {
       status: h.status ? "HTTP " + h.status + (h.status_text ? " " + h.status_text : "") : "failed",
       blocked: !!h.block_type,
       blockCategory: h.block_type || null,
-      error: h.error_label || h.error || ("HTTP " + h.status),
+      error: failed ? (h.error_label || h.error || ("HTTP " + h.status)) : "—",
       data: h,
     });
   });

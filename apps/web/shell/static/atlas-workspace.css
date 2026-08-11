@@ -825,3 +825,135 @@ body.atlas-workspace .layout {
     line-height: 1.6;
     color: var(--atlas-text-muted);
 }
+
+/* --- intercepted flows, end to end ------------------------------------- */
+
+.atlas-flow {
+    border: 1px solid var(--atlas-border);
+    border-left: 3px solid var(--atlas-border-strong);
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+
+.atlas-flow.is-problem { border-left-color: var(--atlas-danger); }
+.atlas-flow.is-warning { border-left-color: var(--atlas-warning); }
+.atlas-flow.is-info { border-left-color: var(--atlas-success); }
+
+.atlas-flow-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.atlas-flow-dest {
+    font-family: var(--atlas-font-mono, monospace);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--atlas-text-strong);
+    word-break: break-all;
+}
+
+.atlas-flow-badge {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--atlas-surface-soft);
+    color: var(--atlas-text-muted);
+}
+
+.atlas-flow.is-problem .atlas-flow-badge {
+    background: var(--atlas-danger-soft);
+    color: var(--atlas-critical);
+}
+
+.atlas-flow.is-warning .atlas-flow-badge {
+    background: var(--atlas-warning-soft);
+    color: var(--atlas-warning);
+}
+
+.atlas-flow-reason {
+    font-family: var(--atlas-font-mono, monospace);
+    font-size: 11px;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-flow-why {
+    margin: 0 0 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--atlas-text);
+}
+
+/* The chain reads left to right in the order the flow travelled. */
+.atlas-flow-chain {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.atlas-flow-hop {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border: 1px solid var(--atlas-border);
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface-soft);
+}
+
+/* A hop nothing could be found for is dimmed, not hidden. An absent hop the
+   reader cannot see is an absent hop they will assume was present. */
+.atlas-flow-hop.is-missing {
+    background: transparent;
+    border-style: dashed;
+}
+
+.atlas-flow-hop-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--atlas-text-subtle);
+}
+
+.atlas-flow-hop-value {
+    font-family: var(--atlas-font-mono, monospace);
+    font-size: 12px;
+    color: var(--atlas-text);
+    word-break: break-all;
+}
+
+.atlas-flow-hop.is-missing .atlas-flow-hop-value {
+    color: var(--atlas-text-subtle);
+    font-style: italic;
+}
+
+.atlas-flow-hop-src {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--atlas-text-subtle);
+}
+
+.atlas-flow-basis p {
+    margin: 0 0 4px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-flow-events {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}

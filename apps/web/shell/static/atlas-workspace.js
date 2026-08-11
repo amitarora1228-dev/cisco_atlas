@@ -580,10 +580,17 @@
      * user is reading. The notice points at the rail instead. */
     function maybeCorrelate() {
         var files = correlationFiles();
-        var count = (files.capture ? 1 : 0) + (files.har ? 1 : 0) + (files.bundle ? 1 : 0);
-        if (count < 2 || !correlateRun || !correlateStatus) return;
+        var names = [];
+        if (files.capture) names.push("capture");
+        if (files.har) names.push("HAR");
+        if (files.bundle) names.push("bundle");
+        if (names.length < 2 || !correlateRun || !correlateStatus) return;
+        // Named, not counted. A file input keeps its selection until the page
+        // is reloaded, so "3 artefacts" can be true while the user believes
+        // they supplied one. Naming them makes that visible instead of
+        // puzzling.
         announce(
-            "Correlating " + count + " artefacts as well. Open Correlation in the rail "
+            "Correlating " + names.join(" + ") + ". Open Correlation in the rail "
                 + "for what they say about each other."
         );
         runCorrelation(correlateRun, correlateStatus, true);
@@ -637,6 +644,8 @@
     function correlateSummary(data) {
         var strip = el("div", "atlas-corr-summary");
         var counts = [
+            ["Intercepted flows", data.summary.intercepted_flows],
+            ["Flows that failed", data.summary.failing_flows],
             ["Hosts", data.summary.hosts],
             ["Steered", data.summary.steered],
             ["Direct", data.summary.direct],
@@ -646,10 +655,13 @@
             ["Failed requests", data.summary.failures]
         ];
         counts.forEach(function (pair) {
+            if (pair[1] === undefined || pair[1] === null) return;
             var cell = el("div", "atlas-corr-stat");
             cell.appendChild(el("span", "atlas-corr-stat-value", String(pair[1])));
             cell.appendChild(el("span", "atlas-corr-stat-label", pair[0]));
-            if (pair[0] === "Failed requests" && pair[1] > 0) cell.classList.add("is-warning");
+            if (pair[1] > 0 && (pair[0] === "Failed requests" || pair[0] === "Flows that failed")) {
+                cell.classList.add("is-warning");
+            }
             strip.appendChild(cell);
         });
         return strip;
@@ -797,6 +809,122 @@
         return box;
     }
 
+    /* The flow list: one intercepted connection, followed across every
+     * artefact that saw it.
+     *
+     * This is the view the counts above cannot give. ZTA steers on rules
+     * written against hosts and addresses, so when a rule matches, the agent
+     * names the destination the application asked for - and that name is the
+     * key the HAR shares and the source port beside it is the key the capture
+     * shares. Each hop states the artefact it came from, so a reader can see
+     * which part of the story is measured and which is the agent's account.
+     */
+    var FLOW_SEVERITY = {
+        problem: { label: "Failed", cls: "is-problem" },
+        warning: { label: "Errors logged", cls: "is-warning" },
+        info: { label: "No fault logged", cls: "is-info" }
+    };
+
+    function correlateFlows(data) {
+        var flows = data.flows || [];
+        var section = el("section", "atlas-corr-block");
+        section.appendChild(el("h3", null, "Intercepted flows, end to end"));
+        section.appendChild(el(
+            "p",
+            "atlas-corr-blurb",
+            "ZTA steers on rules written against hosts and addresses, so where a rule "
+                + "matched, the bundle names the destination the application asked for and the "
+                + "source port it used. That name is what the browser recorded, and that port is "
+                + "what the capture saw - which is how one flow can be followed through all "
+                + "three. Worst first."
+        ));
+
+        if (!flows.length) {
+            section.appendChild(el(
+                "p",
+                "atlas-corr-empty",
+                "No intercepted flow was named. Either no DART bundle was supplied, or its Zero "
+                    + "Trust Access log named no destination."
+            ));
+            return section;
+        }
+
+        var shown = flows.slice(0, 60);
+        shown.forEach(function (flow) {
+            section.appendChild(flowCard(flow));
+        });
+        if (flows.length > shown.length) {
+            section.appendChild(el(
+                "p",
+                "atlas-corr-empty",
+                "Showing the first " + shown.length + " of " + flows.length + " flows, worst first."
+            ));
+        }
+        return section;
+    }
+
+    function flowCard(flow) {
+        var tone = FLOW_SEVERITY[flow.severity] || FLOW_SEVERITY.info;
+        var card = el("article", "atlas-flow " + tone.cls);
+
+        var head = el("header", "atlas-flow-head");
+        head.appendChild(el("span", "atlas-flow-dest", flow.destination));
+        head.appendChild(el("span", "atlas-flow-badge", tone.label));
+        if (flow.reasons && flow.reasons.length) {
+            head.appendChild(el("span", "atlas-flow-reason", flow.reasons.join(", ")));
+        }
+        card.appendChild(head);
+
+        card.appendChild(el("p", "atlas-flow-why", flow.explanation));
+
+        // The chain, one hop per artefact, each labelled with where it came
+        // from. A hop with no evidence says so rather than being omitted -
+        // a gap the reader cannot see is a gap they will assume was filled.
+        var chain = el("div", "atlas-flow-chain");
+        chain.appendChild(flowHop("Browser", "har",
+            flow.requests
+                ? flow.requests + " request(s)"
+                  + (flow.failures ? ", " + flow.failures + " failed" : "")
+                : "not in the HAR"));
+        chain.appendChild(flowHop("Agent", "bundle",
+            flow.label + (flow.stream !== null && flow.stream !== undefined
+                ? " · stream " + flow.stream : "")));
+        chain.appendChild(flowHop("Wire", "capture",
+            flow.wire
+                ? flow.wire.label + " · " + flow.wire.packets + " packet(s)"
+                : "not in the capture"));
+        chain.appendChild(flowHop("Tunnel", "bundle", flow.tunnel || "not identified"));
+        card.appendChild(chain);
+
+        var basis = el("div", "atlas-flow-basis");
+        [flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
+            if (text) basis.appendChild(el("p", null, text));
+        });
+        if (basis.childNodes.length) card.appendChild(basis);
+
+        if (flow.agent_errors && flow.agent_errors.length) {
+            var events = el("div", "atlas-flow-events");
+            flow.agent_errors.slice(0, 4).forEach(function (line) {
+                var row = el("div", "atlas-corr-event is-error");
+                row.appendChild(el("span", "atlas-corr-event-tag", "agent"));
+                row.appendChild(el("span", null, line));
+                events.appendChild(row);
+            });
+            card.appendChild(events);
+        }
+        return card;
+    }
+
+    function flowHop(title, source, value) {
+        var hop = el("div", "atlas-flow-hop" + (
+            /not /.test(value) ? " is-missing" : ""
+        ));
+        hop.appendChild(el("span", "atlas-flow-hop-title", title));
+        hop.appendChild(el("span", "atlas-flow-hop-value", value));
+        hop.appendChild(el("span", "atlas-flow-hop-src", source));
+        return hop;
+    }
+
     function renderCorrelation(data) {
         var host = document.getElementById("atlas-corr-results");
         if (!host) return;
@@ -804,6 +932,7 @@
         host.appendChild(correlateSummary(data));
         var clock = correlateClock(data);
         if (clock) host.appendChild(clock);
+        host.appendChild(correlateFlows(data));
         host.appendChild(correlateHosts(data));
         host.appendChild(correlateTunnels(data));
         var notes = correlateNotes(data);
@@ -846,8 +975,8 @@
                 if (notify) {
                     announce(
                         "Correlation is ready: " + (data.summary ? data.summary.hosts : 0)
-                            + " host(s) across " + supplied.length
-                            + " artefact(s). Open Correlation in the rail."
+                            + " host(s) from " + (supplied.join(" + ") || "no artefact")
+                            + ". Open Correlation in the rail."
                     );
                 }
             })

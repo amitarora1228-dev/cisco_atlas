@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -38,6 +39,23 @@ def index(request: Request) -> HTMLResponse:
     # when running standalone, which leaves the markup untouched.
     with open(os.path.join(_STATIC_DIR, "index.html"), encoding="utf-8") as f:
         html = f.read()
+
+    # The markup carries a hand-written ?v= stamp, which never changes when the
+    # file does - so a browser goes on serving a cached app.js after an edit,
+    # and the edit looks like it had no effect. Restamp with the file's own
+    # modification time, the way the ATLAS shell already does for its assets.
+    for name in ("app.js", "style.css"):
+        stamp = 0
+        try:
+            stamp = int(os.path.getmtime(os.path.join(_STATIC_DIR, name)))
+        except OSError:
+            pass
+        html = re.sub(
+            r'(/static/' + re.escape(name) + r')\?v=\d+',
+            r"\g<1>?v=" + str(stamp),
+            html,
+        )
+
     prefix = request.scope.get("root_path", "").rstrip("/")
     if prefix:
         html = html.replace('="/static/', f'="{prefix}/static/')
@@ -335,11 +353,19 @@ def _build_host_inventory(flows: list[dict]) -> list[dict]:
 
 
 def _har_rows(result) -> list[dict]:
-    """Failed HAR entries as table-friendly rows (only problems)."""
+    """Every HAR entry as a table-friendly row, each flagged as failed or not.
+
+    This used to send only ``har.failed``, which made the flow table read as if
+    the browser had done nothing but fail: a 158-entry HAR arrived as 19 rows,
+    all of them errors. The table has a "Show only problems" control, so the
+    filtering belongs there - and a request that succeeded is evidence too, not
+    least because it proves the ones beside it did not.
+    """
     if not result.har:
         return []
+    failed = {id(e) for e in result.har.failed}
     rows = []
-    for e in result.har.failed:
+    for e in result.har.entries:
         ts = None
         if e.started:
             try:
@@ -348,6 +374,7 @@ def _har_rows(result) -> list[dict]:
                 ts = None
         rows.append({
             "time": ts,
+            "failed": id(e) in failed,
             "host": e.host,
             "url": e.url,
             "method": e.method,

@@ -60,12 +60,34 @@ _EPISODE_GAP = timedelta(minutes=5)
 # between the two artefacts, far tighter than the reuse interval it guards.
 _MATCH_TOLERANCE = timedelta(minutes=15)
 
+# Both sides of the app-flow/tunnel join are written by the same process into
+# the same file, for the same event, at the same instant. This does not need to
+# absorb a clock difference - only the gap between two consecutive writes.
+_STREAM_TOLERANCE = timedelta(seconds=1)
+
 # The agent writes one of these prefixes depending on which transport handled
 # the connection. Grepping only for "tcp_" silently misses every multiplexed
 # tunnel, which is where the interesting events live.
 _AGENT_FLOW_RE = re.compile(
     r"\b(?P<proto>tcp|tls|udp|http2)_(?P<sport>\d{1,5})__(?P<dip>[0-9]{1,3}(?:\.[0-9]{1,3}){3}):(?P<dport>\d{1,5})\b"
 )
+
+# The agent writes a *second*, differently punctuated identifier for the flow
+# between the application and its own listener - a colon instead of the first
+# underscore, and the destination as the **name or address the application
+# asked for** rather than the headend it was tunnelled to:
+#
+#     AppSocketTransport::handleClose() tcp:50299__enroll.cisco.com 12899BF0 stream=1
+#
+# This is the only place in any of the three artefacts where a destination the
+# user recognises is stated by the agent itself, and it carries the source port
+# that leads straight into the capture. Matching only the underscore form above
+# misses it entirely.
+_AGENT_APP_RE = re.compile(
+    r"\b(?P<proto>tcp|tls|udp|http2):(?P<sport>\d{1,5})__(?P<dest>[A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9])"
+)
+_AGENT_STREAM_RE = re.compile(r"\bstream=(?P<stream>\d+)")
+_AGENT_REASON_RE = re.compile(r"closing due to reason:\s*(?P<reason>[a-z_]+)")
 _AGENT_TS_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)")
 _AGENT_LEVEL_RE = re.compile(r"\s(?P<level>[IWE])/\s")
 
@@ -131,6 +153,11 @@ class AgentFlow:
     lines: int = 0
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    streams: tuple[tuple[int, datetime], ...] = ()
+    """``(stream id, when)`` for every HTTP/2 stream this tunnel was seen
+    handling. An app flow names the stream it was given, and the two log lines
+    are written at the same instant, so the pair identifies the tunnel far more
+    tightly than the stream number alone - which restarts on every connection."""
 
     @property
     def identity(self) -> tuple[int, str, int]:
@@ -139,6 +166,33 @@ class AgentFlow:
     @property
     def label(self) -> str:
         return f"{self.proto}_{self.src_port}__{self.dst_ip}:{self.dst_port}"
+
+
+@dataclass(frozen=True)
+class AppFlow:
+    """One connection the agent intercepted, named by the destination asked for.
+
+    ZTA steers on rules written against hosts and addresses, so when a rule
+    matches, the agent knows the destination by the name the application used
+    and records it. That makes this the join the other two artefacts lack: the
+    HAR knows the same name, and the source port here is the same source port
+    the capture saw.
+    """
+
+    proto: str
+    src_port: int
+    dest: str
+    stream: int | None = None
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+    lines: int = 0
+    reasons: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+    error_lines: int = 0
+
+    @property
+    def label(self) -> str:
+        return f"{self.proto}:{self.src_port}__{self.dest}"
 
 
 @dataclass(frozen=True)
@@ -196,11 +250,44 @@ class TunnelCorrelation:
 
 
 @dataclass
+class FlowCorrelation:
+    """One intercepted flow, followed across every artefact that saw it.
+
+    This is the record the other views cannot produce: the destination the
+    application asked for, the agent's own account of what it did with that
+    connection and why it ended, the packets that carry it, and what the
+    browser got back.
+    """
+
+    app: AppFlow
+    wire: WireFlow | None = None
+    wire_strength: JoinStrength = JoinStrength.ASSOCIATED
+    wire_basis: str = ""
+    tunnel: AgentFlow | None = None
+    tunnel_basis: str = ""
+    requests: list[WebRequest] = field(default_factory=list)
+
+    @property
+    def failures(self) -> list[WebRequest]:
+        return [r for r in self.requests if r.failed]
+
+    @property
+    def severity(self) -> str:
+        """Worst-first ordering, from what is actually recorded."""
+        if self.app.reasons or self.failures:
+            return "problem"
+        if self.app.error_lines:
+            return "warning"
+        return "info"
+
+
+@dataclass
 class SessionCorrelation:
     """The joined result, plus an explicit record of what it could not answer."""
 
     hosts: list[HostCorrelation] = field(default_factory=list)
     tunnels: list[TunnelCorrelation] = field(default_factory=list)
+    flows: list[FlowCorrelation] = field(default_factory=list)
     clock_offset: timedelta | None = None
     clock_offset_basis: str = ""
     notes: list[str] = field(default_factory=list)
@@ -406,6 +493,7 @@ def extract_agent_flows(zta_log_path: str) -> list[AgentFlow]:
                     "lines": 0,
                     "errors": [],
                     "warnings": [],
+                    "streams": [],
                 }
                 runs.append(rec)
             rec["lines"] += 1
@@ -427,6 +515,10 @@ def extract_agent_flows(zta_log_path: str) -> list[AgentFlow]:
                 elif level["level"] == "W" and message not in rec["warnings"]:
                     rec["warnings"].append(message)
 
+            stream = _AGENT_STREAM_RE.search(line)
+            if stream and when is not None:
+                rec["streams"].append((int(stream["stream"]), when))
+
     return [
         AgentFlow(
             proto=rec["proto"],
@@ -438,10 +530,104 @@ def extract_agent_flows(zta_log_path: str) -> list[AgentFlow]:
             lines=rec["lines"],
             errors=tuple(rec["errors"][:6]),
             warnings=tuple(rec["warnings"][:6]),
+            streams=tuple(rec["streams"]),
         )
         for key, runs in sorted(episodes.items())
         for rec in runs
     ]
+
+
+def extract_app_flows(zta_log_path: str) -> list[AppFlow]:
+    """Read the intercepted connections the agent named by destination.
+
+    Split into episodes on the same reasoning as ``extract_agent_flows``: the
+    key here is source port plus destination, and source ports are recycled.
+
+    A caveat that must travel with every result read from these lines. With
+    trace-level logging off - which is the default, and was the case in the
+    bundle this was built against - the agent writes the destination name only
+    when it has something to report about that flow. In the test bundle **680
+    of 688** such lines were error level. So this is a list of flows the agent
+    had trouble with, and a destination missing from it is a destination the
+    agent logged no problem for, which is not the same as one that worked.
+    """
+    episodes: dict[tuple[int, str], list[dict]] = defaultdict(list)
+
+    with open(zta_log_path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            match = _AGENT_APP_RE.search(line)
+            if not match:
+                continue
+            key = (int(match["sport"]), match["dest"])
+            when = _agent_time(line)
+
+            runs = episodes[key]
+            rec = runs[-1] if runs else None
+            if rec is None or (
+                when is not None and rec["last"] is not None and when - rec["last"] > _EPISODE_GAP
+            ):
+                rec = {
+                    "proto": match["proto"],
+                    "stream": None,
+                    "first": when,
+                    "last": when,
+                    "lines": 0,
+                    "reasons": [],
+                    "errors": [],
+                    "error_lines": 0,
+                }
+                runs.append(rec)
+            rec["lines"] += 1
+            if when:
+                if rec["first"] is None or when < rec["first"]:
+                    rec["first"] = when
+                if rec["last"] is None or when > rec["last"]:
+                    rec["last"] = when
+
+            stream = _AGENT_STREAM_RE.search(line)
+            if stream and rec["stream"] is None:
+                rec["stream"] = int(stream["stream"])
+
+            reason = _AGENT_REASON_RE.search(line)
+            if reason and reason["reason"] not in rec["reasons"]:
+                rec["reasons"].append(reason["reason"])
+
+            level = _AGENT_LEVEL_RE.search(line)
+            if level and level["level"] == "E":
+                rec["error_lines"] += 1
+                message = _summarise_agent_line(line)
+                if message not in rec["errors"]:
+                    rec["errors"].append(message)
+
+    return [
+        AppFlow(
+            proto=rec["proto"],
+            src_port=key[0],
+            dest=key[1],
+            stream=rec["stream"],
+            first_seen=rec["first"],
+            last_seen=rec["last"],
+            lines=rec["lines"],
+            reasons=tuple(rec["reasons"]),
+            errors=tuple(rec["errors"][:6]),
+            error_lines=rec["error_lines"],
+        )
+        for key, runs in sorted(episodes.items())
+        for rec in runs
+    ]
+
+
+def _agent_time(line: str) -> datetime | None:
+    """The naive local timestamp a ZTA line opens with, if it has one."""
+    stamp = _AGENT_TS_RE.match(line)
+    if not stamp:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(stamp["ts"], fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _summarise_agent_line(line: str) -> str:
@@ -612,6 +798,8 @@ def as_payload(session: SessionCorrelation) -> dict:
             "tunnels": len(session.tunnels),
             "requests": sum(h.request_count for h in session.hosts),
             "failures": sum(len(h.failures) for h in session.hosts),
+            "intercepted_flows": len(session.flows),
+            "failing_flows": sum(1 for f in session.flows if f.severity == "problem"),
         },
         "clock": {
             "offset_seconds": (
@@ -621,9 +809,130 @@ def as_payload(session: SessionCorrelation) -> dict:
         },
         "hosts": sorted(hosts, key=lambda h: (-h["requests"], h["host"])),
         "tunnels": tunnels,
+        "flows": [_flow_payload(flow) for flow in session.flows],
         "notes": session.notes,
         "sources": session.sources,
     }
+
+
+# What the agent's own close-reason token means. These describe the token, they
+# do not diagnose the cause - the agent says what it did, not why the far end
+# behaved as it did, and the difference matters when a reader acts on it.
+_REASON_MEANING = {
+    "connect_timeout": "the onward connection was not established before the agent gave up",
+    "socket_read": "reading from the local application socket failed",
+    "socket_write": "writing to the local application socket failed",
+    "next_transport_state": "the transport underneath the flow changed state while it was open",
+    "tunnel_connect": "the tunnel this flow needed could not be connected",
+    "connect_transport": "the agent could not start the onward transport",
+}
+
+
+def _flow_payload(flow: FlowCorrelation) -> dict:
+    """One intercepted flow, with every claim carrying the artefact behind it."""
+    app = flow.app
+    statuses: dict[str, int] = {}
+    for request in flow.requests:
+        key = str(request.status) if request.status else "no response"
+        statuses[key] = statuses.get(key, 0) + 1
+
+    evidence = [{"source": "bundle", "text": f"ZTA log names this flow {app.label}"}]
+    if flow.wire is not None:
+        evidence.append({"source": "capture", "text": f"{flow.wire.label}, {flow.wire.packets} packet(s)"})
+    if flow.tunnel is not None:
+        evidence.append({"source": "bundle", "text": f"tunnel {flow.tunnel.label}"})
+    if flow.requests:
+        evidence.append({
+            "source": "har",
+            "text": f"{len(flow.requests)} browser request(s) to {app.dest}",
+        })
+
+    return {
+        "destination": app.dest,
+        "label": app.label,
+        "severity": flow.severity,
+        "protocol": app.proto,
+        "src_port": app.src_port,
+        "stream": app.stream,
+        "first_seen": _iso(app.first_seen),
+        "last_seen": _iso(app.last_seen),
+        "agent_lines": app.lines,
+        "error_lines": app.error_lines,
+        "reasons": list(app.reasons),
+        "agent_errors": list(app.errors),
+        "wire": (
+            {
+                "label": flow.wire.label,
+                "packets": flow.wire.packets,
+                "bytes": flow.wire.bytes,
+                "handshake_captured": flow.wire.has_syn,
+                "sni": flow.wire.sni,
+                "listener": f"{flow.wire.dst_ip}:{flow.wire.dst_port}",
+            }
+            if flow.wire is not None
+            else None
+        ),
+        "wire_strength": flow.wire_strength.value if flow.wire is not None else None,
+        "wire_basis": flow.wire_basis,
+        "tunnel": flow.tunnel.label if flow.tunnel is not None else None,
+        "tunnel_basis": flow.tunnel_basis,
+        "requests": len(flow.requests),
+        "failures": len(flow.failures),
+        "statuses": statuses,
+        "explanation": _explain_flow(flow),
+        "evidence": evidence,
+    }
+
+
+def _explain_flow(flow: FlowCorrelation) -> str:
+    """Say what happened to this flow, in the order it happened.
+
+    Every clause is drawn from a specific artefact, and nothing is added where
+    an artefact is silent - a flow with no capture and no HAR reads shorter
+    rather than reading as though more were known.
+    """
+    app = flow.app
+    parts = [
+        f"ZTA steering matched {app.dest}, so the agent intercepted the connection and "
+        f"handled it on source port {app.src_port}"
+    ]
+
+    if flow.wire is not None:
+        where = "the agent's local listener" if flow.wire.is_loopback else "the network"
+        parts.append(
+            f"the capture shows that connection to {where} at {flow.wire.label}, "
+            f"{flow.wire.packets} packet(s)"
+        )
+
+    if flow.tunnel is not None:
+        parts.append(f"it was carried as stream {app.stream} on {flow.tunnel.label}")
+
+    if app.reasons:
+        for reason in app.reasons:
+            meaning = _REASON_MEANING.get(reason)
+            parts.append(
+                f"the agent closed it with reason '{reason}'"
+                + (f" - {meaning}" if meaning else "")
+            )
+    elif app.error_lines:
+        parts.append(
+            f"the agent logged {app.error_lines} error line(s) against it but recorded no "
+            "close reason"
+        )
+
+    if flow.failures:
+        codes = sorted({str(r.status) for r in flow.failures if r.status})
+        parts.append(
+            f"the browser recorded {len(flow.failures)} failed request(s) to this destination"
+            + (f" ({', '.join(codes)})" if codes else "")
+        )
+    elif flow.requests:
+        parts.append(
+            f"the browser's {len(flow.requests)} request(s) to this destination all returned a "
+            "response"
+        )
+
+    return "; ".join(parts) + "."
 
 
 def _derive_clock_offset(tunnels: Iterable[TunnelCorrelation]) -> tuple[timedelta | None, str]:
@@ -681,6 +990,7 @@ def correlate_session(
     wire_flows: list[WireFlow],
     agent_flows: list[AgentFlow],
     web_requests: list[WebRequest],
+    app_flows: list[AppFlow] | None = None,
 ) -> SessionCorrelation:
     """Join the three views of one session.
 
@@ -798,8 +1108,145 @@ def correlate_session(
 
         result.hosts.append(entry)
 
+    result.flows = _correlate_flows(
+        app_flows or [], wire_flows, agent_flows, requests_by_host, result
+    )
+
     _add_notes(result, wire_flows, agent_flows, web_requests)
     return result
+
+
+def _correlate_flows(
+    app_flows: list[AppFlow],
+    wire_flows: list[WireFlow],
+    agent_flows: list[AgentFlow],
+    requests_by_host: dict[str, list[WebRequest]],
+    result: SessionCorrelation,
+) -> list[FlowCorrelation]:
+    """Follow each intercepted flow through every artefact that saw it.
+
+    The chain is the agent's own: it names the destination the application
+    asked for and the source port it used, which is the port the capture sees;
+    and it names the HTTP/2 stream it was given, which is the stream the tunnel
+    reports carrying.
+
+    Each hop is joined on its own terms and reported at its own strength. A
+    source port is a strong key but not a unique one, so where more than one
+    captured flow claims it the join is refused rather than guessed - and the
+    refusals are counted into a note, because a silently dropped join and a
+    join that never existed look identical on screen.
+    """
+    by_port: dict[int, list[WireFlow]] = defaultdict(list)
+    for flow in wire_flows:
+        by_port[flow.src_port].append(flow)
+
+    tunnels_by_stream: dict[int, list[tuple[AgentFlow, datetime]]] = defaultdict(list)
+    for tunnel in agent_flows:
+        for stream, when in tunnel.streams:
+            tunnels_by_stream[stream].append((tunnel, when))
+
+    ambiguous_wire = 0
+    ambiguous_tunnel = 0
+    correlated: list[FlowCorrelation] = []
+
+    for app in app_flows:
+        record = FlowCorrelation(app=app, requests=list(requests_by_host.get(app.dest, [])))
+
+        candidates = by_port.get(app.src_port, [])
+        if len(candidates) == 1:
+            record.wire = candidates[0]
+            record.wire_strength = JoinStrength.EXACT
+            record.wire_basis = (
+                f"The agent used source port {app.src_port} for this flow and the capture holds "
+                f"exactly one connection from that port: {candidates[0].label}."
+            )
+        elif candidates:
+            ambiguous_wire += 1
+            record.wire_basis = (
+                f"{len(candidates)} captured connections used source port {app.src_port}, so "
+                "which one carried this flow cannot be told from these inputs."
+            )
+        else:
+            record.wire_basis = (
+                f"No connection from source port {app.src_port} appears in the capture, so this "
+                "flow happened outside the captured window or on another interface."
+            )
+
+        if app.stream is not None:
+            options = _overlapping(tunnels_by_stream.get(app.stream, []), app)
+            if len(options) == 1:
+                record.tunnel = options[0]
+                record.tunnel_basis = (
+                    f"Carried as HTTP/2 stream {app.stream} on {options[0].label}, which reports "
+                    "that stream while this flow was open."
+                )
+            elif options:
+                ambiguous_tunnel += 1
+                record.tunnel_basis = (
+                    f"{len(options)} tunnels report stream {app.stream} over this period. Stream "
+                    "numbers restart per connection, so the tunnel cannot be named."
+                )
+            else:
+                record.tunnel_basis = (
+                    f"The agent gave this flow stream {app.stream}, but no tunnel in the log "
+                    "reports that stream while it was open."
+                )
+        else:
+            record.tunnel_basis = "The agent did not record a stream for this flow."
+
+        correlated.append(record)
+
+    order = {"problem": 0, "warning": 1, "info": 2}
+    correlated.sort(
+        key=lambda f: (order[f.severity], -f.app.error_lines, f.app.dest, f.app.src_port)
+    )
+
+    if ambiguous_wire:
+        result.notes.append(
+            f"{ambiguous_wire} intercepted flow(s) could not be tied to a captured connection "
+            "because more than one used the same source port. They are listed with the agent's "
+            "account only."
+        )
+    if ambiguous_tunnel:
+        result.notes.append(
+            f"{ambiguous_tunnel} intercepted flow(s) could not be tied to a tunnel because "
+            "several tunnels reported the same stream number in the same period."
+        )
+    if app_flows:
+        errors = sum(1 for f in app_flows if f.error_lines)
+        result.notes.append(
+            f"The agent named a destination for {len(app_flows)} flow(s), {errors} of them while "
+            "reporting an error. With trace-level logging off it records the destination mainly "
+            "when it has a problem to report, so a destination absent from this list is one the "
+            "agent logged no problem for - not one that is known to have worked."
+        )
+
+    return correlated
+
+
+def _overlapping(
+    events: list[tuple[AgentFlow, datetime]], app: AppFlow
+) -> list[AgentFlow]:
+    """Tunnels that reported this stream while this flow was open.
+
+    Both sides come from the same log, so their clocks agree and no offset is
+    involved. The agent writes the app-flow line and the tunnel's line for the
+    same event at the same instant, so a small window either side of the flow's
+    own lifetime is enough - and much tighter than the tolerance used for
+    joins that must cross artefacts.
+
+    Stream numbers restart on every tunnel connection, so this is an
+    association rather than an identity. Where it stays ambiguous the caller
+    says so instead of choosing.
+    """
+    if app.first_seen is None or app.last_seen is None:
+        return sorted({tunnel for tunnel, _ in events}, key=lambda t: t.label)
+    start = app.first_seen - _STREAM_TOLERANCE
+    end = app.last_seen + _STREAM_TOLERANCE
+    return sorted(
+        {tunnel for tunnel, when in events if start <= when <= end},
+        key=lambda t: t.label,
+    )
 
 
 def _add_notes(

@@ -193,7 +193,7 @@ fallback, but PATH is the supported arrangement.
 & .venv\Scripts\python.exe -m ruff check packages\atlas_core apps tools
 ```
 
-**49 tests pass, lint clean** as of the head commit.
+**55 tests pass, lint clean** as of the head commit.
 
 ---
 
@@ -239,10 +239,39 @@ session, what no single artefact can:
 | Join | Key | Strength |
 |---|---|---|
 | Agent log ↔ capture | `<proto>_<srcport>__<dstip>:<dstport>` from the ZTA log | **Exact** — connection identity |
+| Destination ↔ everything | `<proto>:<srcport>__<host>` from the ZTA log | **Exact** on the source port, **observed** on the name |
+| App flow ↔ tunnel | HTTP/2 `stream=N` written at the same instant on both lines | **Associated** — stream numbers restart per connection |
 | Capture ↔ HAR | TLS SNI on the wire vs the HAR's host | **Observed** |
 | Tunnel ↔ request | time and multiplexing | **Associated** — many hosts share one tunnel, so a request cannot be attributed to a particular tunnel |
 
 These are not presented as equal, in the UI or the payload.
+
+### Following one flow end to end
+
+The ZTA log writes **two** differently punctuated identifiers, and only one of
+them was being read at first:
+
+| Written by | Shape | Names |
+|---|---|---|
+| `AppSocketTransport::*` | `tcp:50299__enroll.cisco.com 12899BF0 stream=1` | the destination the application asked for |
+| `Http2MuxTransport::*` | `http2_50300__54.225.88.226:443 15D54BAC stream=1` | the headend the tunnel reached |
+
+Because ZTA steers on rules written against hosts and addresses, a matched rule
+means the agent knows the destination by the name the application used — which
+is the name the HAR knows, beside the source port the capture saw. That is the
+chain: **HAR host → source port → capture flow → stream → tunnel**, with the
+agent's own close reason attached. Measured on the test bundle: 340 intercepted
+flows named, 269 tied to a tunnel, and the two that fall inside the capture
+window tied to it exactly —
+`crl.prod.cagenerator.pki.strln.net` → port 59897 → `127.0.0.1:59897 →
+127.0.0.1:52555` (14 packets) → `http2_59898__54.225.88.226:443` stream 1.
+
+**The caveat that must always travel with it:** 680 of 688 host-named lines in
+that bundle were error level. With trace-level logging off the agent records the
+destination mainly when it has a problem to report, so this is a list of flows
+it had trouble with. A destination absent from it is one the agent logged no
+problem for — **not** one known to have worked. That sentence is emitted as a
+note on every run, and a test asserts it.
 
 ### Two things it deliberately does not do
 
@@ -429,6 +458,12 @@ Every one of these was a real failure here, not a hypothetical.
   An item already pointing at the target engine is left alone - the capture
   engine has seven views of its own, and re-selecting the first would throw the
   reader back to `Inspect` on every switch.
+- **A hand-written `?v=` stamp is not a cache-buster.** The capture engine's
+  markup carried `?v=20260651`, a constant, so browsers served a cached
+  `app.js` after every edit and the edit looked like it had had no effect. Both
+  places that emit that markup — the engine's own page and `capture_document`
+  in the shell, which composes the document itself and never passes through the
+  engine's view — now restamp with the file's modification time.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

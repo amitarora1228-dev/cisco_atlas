@@ -230,6 +230,7 @@ async def correlate_session_upload(
         as_payload,
         correlate_session,
         extract_agent_flows,
+        extract_app_flows,
         extract_web_requests,
         extract_wire_flows,
         find_zta_log,
@@ -266,6 +267,7 @@ async def correlate_session_upload(
                 notes.append(f"The capture could not be read: {exc}")
 
         agent_flows = []
+        app_flows = []
         bundle_path = await _spill(bundle, "bundle.zip")
         if bundle_path:
             sources["bundle"] = os.path.basename(bundle_path)
@@ -274,6 +276,7 @@ async def correlate_session_upload(
                 zta_log = find_zta_log(unpacked)
                 if zta_log:
                     agent_flows = extract_agent_flows(zta_log)
+                    app_flows = extract_app_flows(zta_log)
                 else:
                     notes.append(
                         "The bundle holds no Zero Trust Access log, so the agent's own account "
@@ -291,7 +294,7 @@ async def correlate_session_upload(
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"The HAR could not be read: {exc}")
 
-        result = correlate_session(wire_flows, agent_flows, web_requests)
+        result = correlate_session(wire_flows, agent_flows, web_requests, app_flows)
         result.sources = sources
         result.notes = notes + result.notes
         return JSONResponse(as_payload(result))

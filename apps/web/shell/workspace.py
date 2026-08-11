@@ -69,8 +69,24 @@ def _split_document(html: str) -> tuple[str, str, list[str], str]:
 
 
 def capture_document(prefix: str = "/capture") -> str:
-    """Capture Inspector's page, with its absolute asset paths prefixed."""
+    """Capture Inspector's page, with its absolute asset paths prefixed.
+
+    Its markup carries a hand-written ``?v=`` stamp that does not change when
+    the file does, so a browser goes on serving a cached ``app.js`` after an
+    edit and the edit looks like it had no effect. Restamp with each file's
+    modification time, the same rule the shell's own assets follow. The engine
+    does this for its standalone page too; the shell composes the document
+    itself and so never passes through that code.
+    """
     html = (_CAPTURE_STATIC / "index.html").read_text(encoding="utf-8")
+    for name in ("app.js", "style.css"):
+        asset = _CAPTURE_STATIC / name
+        stamp = int(asset.stat().st_mtime) if asset.exists() else 0
+        html = re.sub(
+            r"(/static/" + re.escape(name) + r")\?v=\d+",
+            r"\g<1>?v=" + str(stamp),
+            html,
+        )
     return html.replace('="/static/', f'="{prefix}/static/')
 
 

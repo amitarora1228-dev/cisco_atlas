@@ -216,6 +216,55 @@ body.atlas-workspace {
     display: none !important;
 }
 
+/* And the reverse. Leaving the summary hands the whole view to the engine, so
+ * the results are hidden rather than left hanging above a fresh form - stale
+ * output over a live control is the same two-tools problem in miniature. */
+#atlas-engine-bundle:not(.is-summary) > #atlas-bundle-results {
+    display: none;
+}
+
+/* The way back, so a finished analysis is not lost by clicking a module. It is
+ * only offered once results exist, and the is-summary rule above hides it while
+ * the summary itself is on screen. */
+.atlas-resume {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: var(--atlas-surface);
+    border: 1px solid var(--atlas-border);
+    border-left: 3px solid var(--atlas-success);
+    border-radius: var(--atlas-radius-sm);
+}
+
+#atlas-engine-bundle.has-results .atlas-resume {
+    display: flex;
+}
+
+.atlas-resume-text {
+    font-size: 0.84rem;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-resume-btn {
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 6px 12px;
+    color: var(--atlas-text-strong);
+    background: transparent;
+    border: 1px solid var(--atlas-border);
+    border-radius: var(--atlas-radius-sm);
+}
+
+.atlas-resume-btn:hover {
+    border-color: var(--atlas-text-muted);
+}
+
 .atlas-results-head {
     display: flex;
     align-items: flex-start;

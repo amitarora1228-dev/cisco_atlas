@@ -219,6 +219,39 @@
         snapshotHome = null;
     }
 
+    /* Leaving the summary means "I want to drive the engine myself", so the
+     * engine's page becomes the whole view - results hidden, not merely pushed
+     * down. Leaving them on screen above a fresh form is the stacked-pages
+     * problem again: two entry points, one of them stale.
+     *
+     * The results are hidden, never discarded, and a single bar offers the way
+     * back so a completed analysis is not lost by clicking a module. */
+    function enterSummary() {
+        var host = document.getElementById("atlas-bundle-results");
+        if (!host) return;
+        setSummaryMode(true);
+        var snap = adoptSnapshot(host);
+        var all = host.querySelector(".atlas-allchecks");
+        if (snap && all) host.insertBefore(snap, all);
+        if (host.scrollIntoView) host.scrollIntoView({ block: "start" });
+    }
+
+    function resumeBar() {
+        var root = document.getElementById(BUNDLE);
+        if (!root) return;
+        if (document.getElementById("atlas-resume")) return;
+
+        var bar = el("div", "atlas-resume");
+        bar.id = "atlas-resume";
+        bar.appendChild(el("span", "atlas-resume-text",
+            "Full bundle analysis is ready"));
+        var back = el("button", "atlas-resume-btn", "Back to summary");
+        back.type = "button";
+        back.addEventListener("click", enterSummary);
+        bar.appendChild(back);
+        root.insertBefore(bar, root.firstChild);
+    }
+
     function currentBundleName() {
         var input = scoped(BUNDLE, "#dartFile");
         var file = input && input.files && input.files[0];
@@ -312,6 +345,10 @@
         returnSnapshot();
         host.innerHTML = "";
         setSummaryMode(true);
+        // Marks that a completed analysis exists to go back to; the resume bar
+        // stays hidden until the user leaves the summary.
+        document.getElementById(BUNDLE).classList.add("has-results");
+        resumeBar();
 
         var skipped = excluded || [];
         var problems = results.filter(function (r) {

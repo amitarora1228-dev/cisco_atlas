@@ -143,6 +143,13 @@ dropped - clearing `innerHTML` with the node adopted would destroy it. The
 checks are still worth keeping: the snapshot does not cover **Inclusions or
 Exclusions, Duo Desktop or Event Viewer Logs**, and carries no full text.
 
+**One view at a time, in both directions.** Summary mode hid the engine's page,
+but leaving summary mode did not hide the results, so a stale results header sat
+above a fresh form - the stacked-pages problem again, smaller. Results are now
+hidden whenever `is-summary` is off. They are hidden, never discarded: a
+`has-results` class puts a single **Back to summary** bar at the top of the
+engine page, so clicking a rail module cannot lose a finished analysis.
+
 ---
 
 ## 3. Running it

@@ -47,6 +47,66 @@ class TsharkNotFoundError(RuntimeError):
     pass
 
 
+# --- field-set capability probe ----------------------------------------------
+#
+# tshark rejects the WHOLE run if any single -e field is unknown to it, so one
+# field added in a later Wireshark release makes every analysis fail with
+# "Some fields aren't valid" - not a degraded result, no result at all. Seen
+# with tls.handshake.ja3 / ja3s, which arrived in Wireshark 3.6; on 3.4 the
+# entire capture became unanalysable.
+#
+# Rather than pin a version table that would have to be maintained against
+# every field we ever add, ask the installed binary what it accepts. The probe
+# is a real invocation with the same -e list: field validation happens before
+# the capture file is read, so /dev/null is enough and it costs well under a
+# second. The answer is cached per executable for the life of the process.
+#
+# Dropped fields are RETURNED, not swallowed. A detector that silently stops
+# firing because its input was quietly removed would report health it never
+# measured, so callers can say which capability this Wireshark lacks.
+
+_UNSUPPORTED_CACHE: dict[tuple[str, tuple[str, ...]], frozenset[str]] = {}
+
+
+def unsupported_fields(exe: str, fields: list[str]) -> frozenset[str]:
+    """Return the subset of ``fields`` the tshark at ``exe`` does not know."""
+    key = (exe, tuple(fields))
+    cached = _UNSUPPORTED_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    cmd = [exe, "-r", os.devnull, "-T", "json"]
+    for f in fields:
+        cmd += ["-e", f]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        stderr = proc.stderr or ""
+    except OSError:
+        # If the probe cannot run at all, assume nothing is unsupported and let
+        # the real invocation report whatever is actually wrong.
+        stderr = ""
+
+    bad: set[str] = set()
+    if "aren't valid" in stderr:
+        known = set(fields)
+        for line in stderr.splitlines():
+            token = line.strip()
+            if token in known:
+                bad.add(token)
+
+    result = frozenset(bad)
+    _UNSUPPORTED_CACHE[key] = result
+    return result
+
+
+def supported_fields(exe: str, fields: list[str]) -> tuple[list[str], frozenset[str]]:
+    """Split ``fields`` into those this tshark accepts and those it rejects."""
+    bad = unsupported_fields(exe, fields)
+    return [f for f in fields if f not in bad], bad
+
+
 # Fields requested from tshark. Kept as a flat list of -e arguments; each maps
 # to an array of strings in tshark's JSON output (-T json with -e fields).
 _FIELDS = [
@@ -227,7 +287,8 @@ def run_tshark(pcap_path: str, tshark_path: Optional[str] = None, display_filter
         display_filter = REDUCE_FILTER
     if display_filter:
         cmd += ["-Y", display_filter]
-    for f in _FIELDS:
+    usable, _dropped = supported_fields(exe, _FIELDS)
+    for f in usable:
         cmd += ["-e", f]
 
     proc = subprocess.run(

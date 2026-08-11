@@ -11,7 +11,7 @@ from .dns_analysis import (
     DnsRecord, analyze_dns, dns_summary, is_block_page_domain, dns_resolver_name,
 )
 from .har import HarEntry, HarResult, parse_har
-from .pcap import Flow, build_flows, find_tshark, run_tshark, run_tunnel_tls, merge_tunnel_tls, extract_nrb_hosts, extract_capture_env, extract_roaming_report
+from .pcap import _FIELDS, Flow, build_flows, find_tshark, run_tshark, run_tunnel_tls, merge_tunnel_tls, extract_nrb_hosts, extract_capture_env, extract_roaming_report, unsupported_fields
 from .context import AnalysisContext, AnalysisResult
 from .findings.dns import _dns_findings
 from .findings.roaming import _roaming_findings, _roaming_report_findings, _ingress_health_findings
@@ -446,6 +446,25 @@ def analyze(pcap_path: Optional[str], har_text: Optional[str], ctx: AnalysisCont
             reduce = _size > _LARGE_CAPTURE_BYTES
             result.reduced = reduce
             packets = run_tshark(pcap_path, keylog_file=keylog_path, reduce=reduce)
+            # A field this Wireshark does not know is dropped rather than being
+            # allowed to fail the whole run, but the detectors that depended on
+            # it then cannot fire. Say so, so their silence is not read as a
+            # clean result.
+            _missing = unsupported_fields(find_tshark() or "", _FIELDS)
+            if _missing:
+                _note = (
+                    "This Wireshark build does not provide " + ", ".join(sorted(_missing))
+                    + ". Those fields were skipped so the rest of the capture could still "
+                    "be analysed, but any check reading them did not run."
+                )
+                if any(f.endswith((".ja3", ".ja3s")) for f in _missing):
+                    _note += (
+                        " That means TLS fingerprinting, and with it the JA3S clustering "
+                        "check for a shared TLS terminator, produced nothing here - absence "
+                        "of that finding is not evidence there is no interception. JA3 "
+                        "arrived in Wireshark 3.6."
+                    )
+                result.notes.append(_note)
             if reduce:
                 result.notes.append(
                     f"Large capture ({_size // (1024 * 1024)} MB): analysed in REDUCED mode — only TLS/DTLS "

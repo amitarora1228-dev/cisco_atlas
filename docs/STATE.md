@@ -193,7 +193,7 @@ fallback, but PATH is the supported arrangement.
 & .venv\Scripts\python.exe -m ruff check packages\atlas_core apps tools
 ```
 
-**45 tests pass, lint clean** as of the head commit.
+**49 tests pass, lint clean** as of the head commit.
 
 ---
 
@@ -297,6 +297,11 @@ Ordered by how likely they are to bite.
    blob is still reachable in history; removing it needs a force push, which has
    not been done unilaterally. That bundle output contained a real employee email
    address and internal AD hostnames.
+10. **JA3/JA3S fingerprinting does not run on Wireshark below 3.6**, which is
+    what is installed here (3.4.7). The analysis no longer fails because of it -
+    the fields are dropped and a note says so - but the JA3S clustering check
+    for a shared TLS terminator produces nothing, and its silence must not be
+    read as evidence of no interception.
 
 ## EVTX parsing, and a wrong turn worth remembering
 
@@ -361,6 +366,14 @@ Every one of these was a real failure here, not a hypothetical.
 - **A new finding category must be registered in all five `CLASSIFICATION_*`
   tables** in the capture engine or it is computed and never displayed. This has
   shipped twice.
+- **tshark rejects the whole run if any one `-e` field is unknown to it.** Not a
+  degraded result - no result at all. `tls.handshake.ja3` and `ja3s` arrived in
+  Wireshark 3.6, so on the 3.4 build in use *every* capture failed with "Some
+  fields aren't valid". The field list is now probed against the installed
+  binary (`pcap.supported_fields`, cached per executable, ~0.7 s once) and
+  unknown fields are dropped with a note naming the check that could not run.
+  Do not add a field without remembering that the deployed Wireshark version is
+  a deployment concern, not a constant.
 - **The ZTA agent logs flow IDs under three prefixes, not one.** `tcp_`, `tls_`
   *and* `http2_`. Grepping only `tcp_` finds nothing interesting, because the
   multiplexed tunnel — where the errors live — is only ever `http2_`. This cost

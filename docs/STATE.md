@@ -186,13 +186,14 @@ fallback, but PATH is the supported arrangement.
 | `/capture/`, `/bundle/` | Each engine standalone (still works) |
 | `/healthz` | Engines, tshark version, degraded features |
 | `/atlas/api/bundle/analyze-all` | Runs every applicable bundle check from one upload |
+| `/atlas/api/correlate` | Joins a bundle, a capture and a HAR into one account of a session. Every artefact optional; uploads deleted when the request finishes |
 
 ```powershell
 & .venv\Scripts\python.exe -m pytest -q
 & .venv\Scripts\python.exe -m ruff check packages\atlas_core apps tools
 ```
 
-**29 tests pass, lint clean** as of the head commit.
+**45 tests pass, lint clean** as of the head commit.
 
 ---
 

@@ -151,6 +151,28 @@
         };
     }
 
+    /* Is this node one the engine is actually showing?
+     *
+     * Not answerable with offsetParent here. The workspace hides whichever
+     * engine is not on screen, and *nothing* inside a display:none subtree has
+     * an offsetParent - so every control in the bundle engine reads as hidden
+     * whenever the user is looking at the capture engine, whatever the engine
+     * itself intends. Computed style does not have that problem: a descendant
+     * of a hidden element still reports its own display value.
+     *
+     * So walk up to the engine root and ask each ancestor in between, which
+     * answers what the engine is showing independently of what the workspace
+     * is showing.
+     */
+    function shownByEngine(node, engine) {
+        var root = document.getElementById(engine);
+        for (var n = node; n && n !== root; n = n.parentElement) {
+            var style = window.getComputedStyle(n);
+            if (style.display === "none" || style.visibility === "hidden") return false;
+        }
+        return true;
+    }
+
     /* True when the chosen module offers check options but none is selected.
      * Detected from the controls actually present, so a module that needs no
      * check is not blocked by a rule hardcoded here. */
@@ -161,7 +183,7 @@
         if (!options.length) return false;
         var visible = Array.prototype.some.call(options, function (o) {
             var label = document.querySelector('label[for="' + o.id + '"]');
-            return label && label.offsetParent !== null;
+            return label && shownByEngine(label, BUNDLE);
         });
         if (!visible) return false;
         return !document.querySelector(

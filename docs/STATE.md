@@ -293,11 +293,18 @@ Ordered by how likely they are to bite.
    radio values, select options and button labels. An element with no id that is
    not a form control - the user badge, for instance - can vanish without failing
    a test.
-9. **A HAR was committed and pushed** in `6bd709c` and removed in `df16b9e`. The
+9. **Analysing a capture and a bundle together is slow, and looks hung.** Both
+   analyses are CPU-bound Python in one server process, so they serialise. The
+   YouTube capture alone finishes in about 6 s; alongside a full bundle analysis
+   the pair takes two to three minutes, during which both panes sit on their
+   "Analysing…" text with no progress. Measured, not estimated - both requests
+   do complete and both panes render correctly. It is a throughput problem, not
+   a failure, and there is no progress reporting to say so.
+10. **A HAR was committed and pushed** in `6bd709c` and removed in `df16b9e`. The
    blob is still reachable in history; removing it needs a force push, which has
    not been done unilaterally. That bundle output contained a real employee email
    address and internal AD hostnames.
-10. **JA3/JA3S fingerprinting does not run on Wireshark below 3.6**, which is
+11. **JA3/JA3S fingerprinting does not run on Wireshark below 3.6**, which is
     what is installed here (3.4.7). The analysis no longer fails because of it -
     the fields are dropped and a note says so - but the JA3S clustering check
     for a shared TLS terminator produces nothing, and its silence must not be
@@ -390,6 +397,17 @@ Every one of these was a real failure here, not a hypothetical.
   the first packet is server→client the source port reads 443 and every join
   fails. A SYN-without-ACK anchors the client; with no handshake, the lower port
   is the listener.
+- **`offsetParent` is not a visibility test inside the workspace.** The shell
+  hides whichever engine is not active with `display:none` on the engine root. A
+  descendant of a hidden ancestor still reports its *own* computed display
+  correctly, but its `offsetParent` is `null` because nothing is laid out. The
+  shell's `needsCheckOption()` used `offsetParent` to decide whether the bundle
+  engine was showing ZTA check options; with the capture engine active it always
+  concluded there were none, dispatched the engine's own form submit, and the
+  engine answered with the modal *"Please select one ZTA analysis check
+  option."* — the exact dialog the guard existed to prevent. Walk the ancestor
+  chain with `getComputedStyle` instead (`shownByEngine`); it does not depend on
+  layout.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

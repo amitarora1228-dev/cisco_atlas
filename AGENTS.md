@@ -133,3 +133,29 @@ people most often:
 Both must be clean. If you changed behaviour that a test asserted, update the
 test **and say so** - a deliberately changed contract and a regression look
 identical in a diff, and only one of them is acceptable.
+
+---
+
+## 9. Before you commit - mandatory, in this order
+
+Nothing is committed until all four are done. They are part of the change, not
+paperwork that follows it: a record written later is written from memory, and
+memory is exactly what this discipline exists to replace.
+
+1. **Update [`CHANGELOG.md`](CHANGELOG.md).** Record what changed and why it
+   mattered, under `Added`, `Changed`, `Fixed` or `Documentation`. State
+   measured numbers, and record what was **verified**, not what was intended. If
+   a change was not checked against reality, say so.
+2. **Update the documentation the change makes untrue.** At minimum
+   [`docs/STATE.md`](docs/STATE.md) - §1 already requires this. Also whichever
+   of `docs/` describes the behaviour you altered, and any route, limitation or
+   trap table the change affects.
+3. **Re-examine [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md).** Delete what
+   your change fixed. Add what your change revealed - including weaknesses you
+   chose not to address, and any you introduced. Every entry cites the evidence
+   that produced it; where a claim rests on reasoning rather than measurement,
+   it must say so.
+4. **Run the gates in §8.** Both clean.
+
+Delete what has stopped being true in all three documents. A stale record is
+worse than none, because it is believed.

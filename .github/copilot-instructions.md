@@ -50,3 +50,24 @@ claims plainly when they turn out to be wrong.
 `pytest -q` and `ruff check packages/atlas_core apps tools` must both be clean.
 If you changed behaviour a test asserted, update the test and say so - a
 deliberate contract change and a regression look identical in a diff.
+
+## Before committing - mandatory, in this order
+
+Nothing is committed until all four are done, and they are part of the change
+rather than paperwork that follows it. A record written later is written from
+memory, which is what this discipline exists to replace.
+
+1. **Update [`CHANGELOG.md`](../CHANGELOG.md)** - what changed and why it
+   mattered, with measured numbers, recording what was verified rather than
+   intended.
+2. **Update the documentation the change makes untrue** - always
+   [`docs/STATE.md`](../docs/STATE.md), plus whatever else describes the
+   behaviour you altered.
+3. **Re-examine [`docs/IMPROVEMENTS.md`](../docs/IMPROVEMENTS.md)** - delete what
+   you fixed, add what you revealed, including weaknesses you chose not to
+   address or introduced. Every entry cites its evidence.
+4. **Run the gates above.**
+
+Delete what has stopped being true. A stale record is worse than none, because
+it is believed.
+

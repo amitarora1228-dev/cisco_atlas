@@ -531,3 +531,8 @@ Specifically, update it when you: finish or abandon a piece of work, discover a
 limitation, hit a trap worth recording, take a decision, or change what the head
 commit is. Delete anything that has stopped being true - a stale state document
 is worse than none, because it is believed.
+
+This file is one of three that must be current before anything is committed. The
+other two are [`CHANGELOG.md`](../CHANGELOG.md), which records what changed and
+whether it was verified, and [`IMPROVEMENTS.md`](IMPROVEMENTS.md), which records
+what is still worth fixing and the evidence for it. `AGENTS.md` §9 has the order.

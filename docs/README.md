@@ -8,6 +8,8 @@ have already cost time. It is kept current as work happens - see
 | Document | Read it when |
 |---|---|
 | **[STATE.md](STATE.md)** | Always, first. And update it before you finish |
+| [IMPROVEMENTS.md](IMPROVEMENTS.md) | You are deciding what to work on next, or have just finished something and must record what it revealed |
+| [../CHANGELOG.md](../CHANGELOG.md) | You want to know what changed, when, and whether it was verified |
 | [ASSESSMENT.md](ASSESSMENT.md) | You need the platform comparison, the unification strategy, or *why* a decision was taken and what it committed us to |
 | [PHASE1_UNIFICATION.md](PHASE1_UNIFICATION.md) | You are working on the shared UI, and want the measurements the plan rests on |
 | [PHASE2_CORRELATION.md](PHASE2_CORRELATION.md) | You are building correlation, or deciding what to build next |

@@ -5,7 +5,7 @@ finish.** It is the one place that says what exists, where each thing stands, an
 what is known to be broken. If it disagrees with any other document, this file is
 right and the other one is stale.
 
-**Last updated:** 2026-08-11 · branch `main` · head `9b6033f` (snapshot-led bundle results)
+**Last updated:** 2026-08-11 · branch `main` · head `452ca7e` (snapshot-led bundle results, one view at a time)
 
 ---
 

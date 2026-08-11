@@ -263,6 +263,19 @@ returned **403/502 for every request, 0 bytes**, while `accounts.youtube.com`
 reached its peer directly. That is a correlation, not a cause, and is presented
 as one.
 
+### How it is started
+
+Analyze runs correlation itself whenever **two or more** artefacts are loaded -
+supplying more than one is the reason to correlate, so it should not need a
+second click. Two are enough because the engine states what the missing third
+could not answer rather than refusing to run.
+
+It does not switch to the result. Analyze leaves the view exactly where it was:
+the capture, bundle and correlation results are each built into their own panel
+and stay there, and a notice names where the cross-artefact answer will be. The
+notice is repeated on completion, because the bundle engine clears it when its
+own results land and a pointer nobody saw is the same as no pointer.
+
 ---
 
 ## 5. Known limitations and open problems
@@ -408,6 +421,14 @@ Every one of these was a real failure here, not a hypothetical.
   option."* — the exact dialog the guard existed to prevent. Walk the ancestor
   chain with `getComputedStyle` instead (`shownByEngine`); it does not depend on
   layout.
+- **Moving an engine panel is not the same as moving the rail highlight.** For a
+  while Analyze jumped to the bundle engine while the rail still read `Inspect`,
+  so the navigation and the content disagreed about where the user was. Panel
+  visibility and rail state are now changed together in `showEngine`, and every
+  rail item carries `data-engine` so the highlight can be found from the panel.
+  An item already pointing at the target engine is left alone - the capture
+  engine has seven views of its own, and re-selecting the first would throw the
+  reader back to `Inspect` on every switch.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

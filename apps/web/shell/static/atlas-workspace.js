@@ -501,7 +501,6 @@
         body.append("file", input.files[0]);
 
         announce("Analysing everything in the bundle. This can take a minute.");
-        showEngine(BUNDLE);
 
         // One upload; the server runs every check in-process. Driving the matrix
         // from here would re-send the archive once per check.
@@ -526,7 +525,13 @@
      * Each engine keeps its own analysis flow; this only decides which of them
      * to start. The bundle engine is driven by submitting its form, which is
      * what its own button does, so its validation and request building are
-     * untouched. */
+     * untouched.
+     *
+     * Nothing here changes which view is on screen. It used to jump to the
+     * bundle engine, which hid the capture analysis the same click had just
+     * started and left the reader looking at an upload panel mid-scan. The
+     * results are built into each engine's own panel and stay there, so the
+     * rail is the way to them and the notice says so. */
     function wireAnalyze() {
         var run = document.querySelector("#" + CAPTURE + " #run");
         if (!run) return;
@@ -546,12 +551,13 @@
                     if (form) {
                         setSummaryMode(false);
                         form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-                        showEngine(BUNDLE);
                     }
                 } else {
                     analyzeEntireBundle();
                 }
             }
+
+            maybeCorrelate();
 
             // With no capture artifact the capture engine would report a missing
             // file, which is noise when the user only supplied a bundle.
@@ -560,6 +566,27 @@
                 event.stopImmediatePropagation();
             }
         }, true);
+    }
+
+    /* Correlation is the reason for supplying more than one artefact, so it
+     * should not need a second, separate click to happen.
+     *
+     * Two are enough: the engine states what the missing third could not
+     * answer rather than refusing to run. Below two there is nothing to join
+     * and a run would only produce notes.
+     *
+     * The result is deliberately *not* shown here. Correlation finishes on its
+     * own schedule, and switching to it would bury whichever engine result the
+     * user is reading. The notice points at the rail instead. */
+    function maybeCorrelate() {
+        var files = correlationFiles();
+        var count = (files.capture ? 1 : 0) + (files.har ? 1 : 0) + (files.bundle ? 1 : 0);
+        if (count < 2 || !correlateRun || !correlateStatus) return;
+        announce(
+            "Correlating " + count + " artefacts as well. Open Correlation in the rail "
+                + "for what they say about each other."
+        );
+        runCorrelation(correlateRun, correlateStatus, true);
     }
 
     function announce(message) {
@@ -783,7 +810,10 @@
         if (notes) host.appendChild(notes);
     }
 
-    function runCorrelation(button, status) {
+    var correlateRun = null;
+    var correlateStatus = null;
+
+    function runCorrelation(button, status, notify) {
         var files = correlationFiles();
         if (!files.capture && !files.har && !files.bundle) {
             status.textContent = "Add a capture, a HAR or a DART bundle in Provide evidence first.";
@@ -810,9 +840,20 @@
                 status.textContent = "Correlated " + (supplied.length || 0)
                     + " artefact(s): " + (supplied.join(", ") || "none");
                 renderCorrelation(data);
+                // Said again on completion because the bundle engine clears the
+                // notice when its own results land, and a pointer the reader
+                // never saw is the same as no pointer.
+                if (notify) {
+                    announce(
+                        "Correlation is ready: " + (data.summary ? data.summary.hosts : 0)
+                            + " host(s) across " + supplied.length
+                            + " artefact(s). Open Correlation in the rail."
+                    );
+                }
             })
             .catch(function (err) {
                 status.textContent = err.message || "Correlation failed.";
+                if (notify) announce("Correlation failed: " + (err.message || "unknown error"));
             })
             .then(function () {
                 button.disabled = false;
@@ -843,6 +884,8 @@
         var status = el("span", "atlas-corr-status");
         status.setAttribute("role", "status");
         button.addEventListener("click", function () { runCorrelation(button, status); });
+        correlateRun = button;
+        correlateStatus = status;
         bar.appendChild(button);
         bar.appendChild(status);
         view.appendChild(bar);
@@ -860,6 +903,23 @@
             var node = document.getElementById(id);
             if (node) node.classList.toggle("is-active", id === which);
         });
+        syncRail(which);
+    }
+
+    /* The rail read "Inspect" while the bundle panel filled the screen, because
+     * this function moved the panel and nothing moved the highlight. Whoever
+     * changes the panel now changes the rail with it.
+     *
+     * An item already pointing at this engine is left alone: the capture engine
+     * has seven views of its own, and re-selecting the first of them would
+     * throw the reader back to Inspect every time. */
+    function syncRail(which) {
+        var active = document.querySelector(".atlas-rail .atlas-rail-item.is-active");
+        if (active && active.dataset.engine === which) return;
+        var target = document.querySelector(
+            '.atlas-rail .atlas-rail-item[data-engine="' + which + '"]'
+        );
+        if (target) markActive(target);
     }
 
     function markActive(item) {
@@ -882,6 +942,7 @@
             Array.prototype.slice.call(captureNav.querySelectorAll(".nav-item")).forEach(
                 function (item) {
                     item.classList.add("atlas-rail-item");
+                    item.dataset.engine = CAPTURE;
                     item.addEventListener("click", function () { showEngine(CAPTURE); });
                     rail.appendChild(item);
                 }
@@ -904,6 +965,7 @@
             + '<path d="M3.3 7L12 12l8.7-5"/><path d="M12 22V12"/>';
         bundleBtn.appendChild(bundleIcon);
         bundleBtn.appendChild(el("span", null, "Bundle analysis"));
+        bundleBtn.dataset.engine = BUNDLE;
         bundleBtn.addEventListener("click", function () {
             setSummaryMode(false);
             showEngine(BUNDLE);
@@ -924,6 +986,7 @@
                     (source ? source.textContent : radio.value).trim());
                 item.type = "button";
                 item.dataset.module = radio.value;
+                item.dataset.engine = BUNDLE;
                 item.addEventListener("click", function () {
                     radio.checked = true;
                     radio.dispatchEvent(new Event("change", { bubbles: true }));
@@ -950,6 +1013,7 @@
         corrIcon.innerHTML = '<circle cx="8" cy="12" r="5"/><circle cx="16" cy="12" r="5"/>';
         corrBtn.appendChild(corrIcon);
         corrBtn.appendChild(el("span", null, "Correlation"));
+        corrBtn.dataset.engine = CORRELATE;
         corrBtn.addEventListener("click", function () {
             setSummaryMode(false);
             showEngine(CORRELATE);

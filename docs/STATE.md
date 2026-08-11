@@ -127,6 +127,22 @@ counted as **nothing found**, not as a finding. Only an `errors` check that
 actually reported something gets a coloured accent or opens unasked; line counts
 measure verbosity, not importance, so they are muted rather than headlined.
 
+**The snapshot is the verdict, not our banner.** The bundle engine already builds
+a ZTA Health Snapshot from the same upload, and it interprets - verdict,
+severity, what it means, impact, suggested next steps, grouped plain-English
+evidence. Showing our check list above it produced two answers to one question,
+and on the test bundle they disagreed: the snapshot read *Degraded - review User
+Pause* while our list read *no problems reported*. So `renderBundleResults` now
+**moves** `#ztaSummaryPanel` to the top of the results and folds all eight checks
+into one collapsed `All checks and full output`. Our banner survives only as the
+fallback for a bundle the snapshot cannot speak for.
+
+The snapshot node is moved, never rebuilt, so the engine's listeners survive, and
+it is put back before the results are cleared and whenever summary mode is
+dropped - clearing `innerHTML` with the node adopted would destroy it. The
+checks are still worth keeping: the snapshot does not cover **Inclusions or
+Exclusions, Duo Desktop or Event Viewer Logs**, and carries no full text.
+
 ---
 
 ## 3. Running it

@@ -319,6 +319,58 @@ body.atlas-workspace {
     color: var(--atlas-text-muted);
 }
 
+/* The engine's ZTA Health Snapshot, moved to the top to serve as the verdict.
+ * It brings its own styling from the engine; this only spaces it. */
+#atlas-bundle-results #ztaSummaryPanel {
+    margin: 0 0 18px;
+}
+
+/* Every check, folded away beneath the snapshot. */
+.atlas-allchecks {
+    border-top: 1px solid var(--atlas-border);
+    padding-top: 14px;
+    margin-top: 4px;
+}
+
+.atlas-allchecks > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    cursor: pointer;
+    list-style: none;
+    padding: 4px 0;
+}
+
+.atlas-allchecks > summary::-webkit-details-marker {
+    display: none;
+}
+
+.atlas-allchecks > summary::before {
+    content: "\25B8";
+    color: var(--atlas-text-subtle);
+    font-size: 0.72rem;
+}
+
+.atlas-allchecks[open] > summary::before {
+    content: "\25BE";
+}
+
+.atlas-allchecks-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-allchecks-count {
+    font-family: var(--atlas-font-mono);
+    font-size: 0.72rem;
+    color: var(--atlas-text-subtle);
+}
+
+.atlas-allchecks-body {
+    padding-top: 12px;
+}
+
 .atlas-results-title {
     margin: 0 0 4px;
     font-size: 1.16rem;

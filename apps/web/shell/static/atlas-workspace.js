@@ -187,6 +187,36 @@
     function setSummaryMode(on) {
         var root = document.getElementById(BUNDLE);
         if (root) root.classList.toggle("is-summary", !!on);
+        if (!on) returnSnapshot();
+    }
+
+    /* The bundle engine already builds a ZTA Health Snapshot from the same
+     * upload, and it interprets: verdict, severity, what it means, impact,
+     * suggested next steps. Rendering our own verdict beside it produced two
+     * answers to one question - on the test bundle the snapshot read "Degraded,
+     * review User Pause" while our check list read "no problems reported".
+     *
+     * The snapshot wins, so it becomes the verdict and our checks move beneath
+     * it. The node is *moved*, never rebuilt, so every listener the engine
+     * attached to it keeps working, and it is put back where it came from when
+     * the user returns to the engine's own page. */
+    var snapshotHome = null;
+
+    function adoptSnapshot(host) {
+        var snap = document.getElementById("ztaSummaryPanel");
+        if (!snap || snap.classList.contains("hidden")) return null;
+        if (!snapshotHome) {
+            snapshotHome = { parent: snap.parentNode, next: snap.nextSibling };
+        }
+        host.appendChild(snap);
+        return snap;
+    }
+
+    function returnSnapshot() {
+        var snap = document.getElementById("ztaSummaryPanel");
+        if (!snap || !snapshotHome || !snapshotHome.parent) return;
+        snapshotHome.parent.insertBefore(snap, snapshotHome.next);
+        snapshotHome = null;
     }
 
     function currentBundleName() {
@@ -277,6 +307,9 @@
                 host, document.getElementById(BUNDLE).firstChild
             );
         }
+        // Put the snapshot back before clearing, or a second run would destroy
+        // the engine's node along with our own markup.
+        returnSnapshot();
         host.innerHTML = "";
         setSummaryMode(true);
 
@@ -305,23 +338,47 @@
         // The one question worth answering above everything else. It counts only
         // the checks that report failures, so it cannot be inflated by a config
         // dump, and it says which checks - not just how many.
-        var verdict = el("div", "atlas-verdict" + (problems.length ? " is-flagged" : " is-clear"));
-        if (problems.length) {
-            verdict.appendChild(el("strong", "atlas-verdict-title",
-                problems.length === 1
-                    ? "1 check reported a problem"
-                    : problems.length + " checks reported problems"));
-            verdict.appendChild(el("span", "atlas-verdict-detail",
-                problems.map(function (r) { return r.label.replace(/^ZTA - /, ""); }).join(" · ")));
-        } else {
-            verdict.appendChild(el("strong", "atlas-verdict-title",
-                "No problems reported"));
-            verdict.appendChild(el("span", "atlas-verdict-detail",
-                "The checks that report only failures found nothing. That is not proof "
-                + "the endpoint is healthy - the status checks below can still carry "
-                + "errors in their text, and nothing here judges them."));
+        // The snapshot is the verdict when it exists. Our own banner is the
+        // fallback for bundles it cannot speak for - a non-ZTA bundle, or one
+        // where the engine returned no signals.
+        var snapshot = adoptSnapshot(host);
+
+        if (!snapshot) {
+            var verdict = el("div", "atlas-verdict" + (problems.length ? " is-flagged" : " is-clear"));
+            if (problems.length) {
+                verdict.appendChild(el("strong", "atlas-verdict-title",
+                    problems.length === 1
+                        ? "1 check reported a problem"
+                        : problems.length + " checks reported problems"));
+                verdict.appendChild(el("span", "atlas-verdict-detail",
+                    problems.map(function (r) { return r.label.replace(/^ZTA - /, ""); }).join(" · ")));
+            } else {
+                verdict.appendChild(el("strong", "atlas-verdict-title",
+                    "No problems reported"));
+                verdict.appendChild(el("span", "atlas-verdict-detail",
+                    "The checks that report only failures found nothing. That is not proof "
+                    + "the endpoint is healthy - the status checks below can still carry "
+                    + "errors in their text, and nothing here judges them."));
+            }
+            host.appendChild(verdict);
         }
-        host.appendChild(verdict);
+
+        // Every check, folded away. The snapshot covers five of them and reads
+        // them better; these are here for the three it does not cover
+        // (Inclusions or Exclusions, Duo Desktop, Event Viewer Logs) and for the
+        // full text behind all eight. Collapsed, because a reader who needs raw
+        // output will go looking for it, and one who does not should not have to
+        // scroll past it.
+        var answered = results.filter(hasFinding).length;
+        var all = el("details", "atlas-allchecks");
+        var allSummary = document.createElement("summary");
+        allSummary.appendChild(el("span", "atlas-allchecks-title",
+            snapshot ? "All checks and full output" : "All checks"));
+        allSummary.appendChild(el("span", "atlas-allchecks-count",
+            answered + " of " + results.length + " produced output"));
+        all.appendChild(allSummary);
+        var body = el("div", "atlas-allchecks-body");
+        all.appendChild(body);
 
         GROUPS.forEach(function (group) {
             var mine = results.filter(function (r) { return r.kind === group.kind; });
@@ -346,8 +403,9 @@
                     && hasFinding(r)));
             });
             section.appendChild(list);
-            host.appendChild(section);
+            body.appendChild(section);
         });
+        host.appendChild(all);
 
         // A skipped check should be a visible choice, not a silent gap.
         if (skipped.length) {

@@ -138,6 +138,38 @@
         drops.appendChild(buildBundleCard());
     }
 
+    /* Say what is actually loaded, not what was last clicked.
+     *
+     * Every filename label here is written by a `change` or `drop` handler and
+     * by nothing else, so it describes the last interaction rather than the
+     * state of the input. Browsers restore file input selections across a
+     * reload - Firefox notably does - which leaves the input holding a capture
+     * while the tile reads "no file selected". Analyze then correctly uses the
+     * file, and the screen looks like it invented one: a correlation reporting
+     * "capture + bundle + har" beside two tiles claiming nothing was chosen.
+     *
+     * The files are real, so they are not discarded. The labels are corrected
+     * to match them.
+     */
+    function syncEvidenceLabels() {
+        [
+            ["#" + CAPTURE + " #pcap", "pcap-name", "drop-pcap", true],
+            ["#" + CAPTURE + " #har", "har-name", "drop-har", true],
+            ["#" + CAPTURE + " #keylog", "keylog-name", "drop-keylog", true],
+            ["#" + BUNDLE + " #dartFile", "bundle-name", "drop-bundle", false]
+        ].forEach(function (spec) {
+            var input = document.querySelector(spec[0]);
+            var label = document.getElementById(spec[1]);
+            var drop = document.getElementById(spec[2]);
+            if (!input || !label || !input.files || !input.files.length) return;
+            var file = input.files[0];
+            label.textContent = spec[3]
+                ? file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)"
+                : file.name;
+            if (drop) drop.classList.add("has-file");
+        });
+    }
+
     /* ---- analysis -------------------------------------------------------- */
 
     function loadedFiles() {
@@ -786,6 +818,7 @@
 
         run.addEventListener("click", function (event) {
             var loaded = loadedFiles();
+            clearStaleResults();
 
             if (loaded.bundle) {
                 // Analyse whatever the bundle contains, without making the user
@@ -845,6 +878,37 @@
                 + "for what they say about each other."
         );
         runCorrelation(correlateRun, correlateStatus, true);
+    }
+
+    /* A run must never be read alongside the one before it.
+     *
+     * Nothing here used to be cleared, so analysing a bundle after a capture
+     * left the capture's findings, its correlation and its notice on screen -
+     * output describing artefacts this run did not touch, presented as though
+     * it belonged to it. Everything this run will not produce is removed
+     * before it starts.
+     */
+    function clearStaleResults() {
+        var files = correlationFiles();
+        clearNotice();
+
+        if (!files.capture && !files.har) {
+            var results = document.querySelector("#" + CAPTURE + " #results");
+            if (results) results.classList.add("hidden");
+        }
+        if (!files.bundle) {
+            var bundle = document.getElementById("atlas-bundle-results");
+            if (bundle) bundle.innerHTML = "";
+        }
+
+        var supplied = (files.capture ? 1 : 0) + (files.har ? 1 : 0) + (files.bundle ? 1 : 0);
+        if (supplied < 2) {
+            lastCorrelation = null;
+            var corr = document.getElementById("atlas-corr-results");
+            if (corr) corr.innerHTML = "";
+            if (correlateStatus) correlateStatus.textContent = "";
+        }
+        renderReportView();
     }
 
     function announce(message) {
@@ -1429,6 +1493,7 @@
     function init() {
         installFetchShim();
         rebuildEvidence();
+        syncEvidenceLabels();
         wireAnalyze();
         wireReport();
 

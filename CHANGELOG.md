@@ -60,6 +60,24 @@ under `[Unreleased]` until one is cut.
 
 ### Fixed
 
+- **A new run showed the previous run's results.** Nothing was cleared when
+  Analyze started, so analysing a bundle after a capture left the capture's
+  findings, its correlation and its notice on screen - output describing
+  artefacts the current run never touched. Reported as "not sure how it is
+  showing this data". Everything a run will not produce is now removed before
+  it starts. Verified: 200 flow rows from a capture disappear the moment a
+  bundle-only run begins, and the report then contains only the bundle.
+- **Filename labels could disagree with the files actually loaded.** Each label
+  is written by a `change` or `drop` handler and by nothing else, so it
+  describes the last interaction rather than the state of the input. Browsers
+  restore file input selections across a reload, which leaves a capture in the
+  input while the tile reads "no file selected" - and a correlation honestly
+  reporting "capture + bundle + har" beside two tiles claiming nothing was
+  chosen. The labels are now synced from the inputs at startup; the files are
+  real and are not discarded. **Not verified against the browser that restores
+  them:** Chromium, which the test harness drives, does not restore file
+  inputs, so only the divergence this produces was reproduced, not the restore
+  itself.
 - **The Report view was unreachable without a capture.** Two causes, both
   found by measurement. The engine treats its views as scroll targets on one
   long page and its Report handler returns the reader to the evidence card

@@ -500,6 +500,14 @@ Every one of these was a real failure here, not a hypothetical.
   `scrollIntoView({behavior: "smooth"})` leaves `scrollY` at 0 there while
   working normally in a real browser. Assert that the call was made and its
   target, not the final scroll position.
+- **A filename label is not a record of what is loaded.** Every evidence tile's
+  label is written by a `change` or `drop` handler and by nothing else, so it
+  reports the last interaction rather than the state of the input. Browsers
+  restore file input selections across a reload, so an input can hold a capture
+  while its tile reads "no file selected" - which made a correct correlation
+  over three artefacts look invented. The labels are synced from the inputs at
+  startup. Anything else that reasons about what is loaded must read
+  `input.files`, never the label.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

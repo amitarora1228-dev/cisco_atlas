@@ -2039,8 +2039,16 @@
             return t.segments && t.segments.length;
         });
         if (!traces.length) {
-            host.appendChild(el("p", "atlas-corr-blurb",
-                "No transaction was found in these captures."));
+            /* "None found" and "none matched" are different statements, and
+             * only one of them is true when a filter is active - the
+             * transactions are in the captures, they just did not match. The
+             * note underneath already said "Showing 0 of 1", so the headline
+             * was contradicting it. */
+            var term = document.getElementById("atlas-path-focus");
+            var narrowed = term && term.value.trim();
+            host.appendChild(el("p", "atlas-corr-blurb", narrowed
+                ? "No transaction mentions '" + narrowed + "'. Clear the filter to see them all."
+                : "No transaction was found in these captures."));
         }
         traces.slice(0, 60).forEach(function (trace) {
             host.appendChild(pathTrace(trace));

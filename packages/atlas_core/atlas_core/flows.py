@@ -88,6 +88,20 @@ _AGENT_APP_RE = re.compile(
 )
 _AGENT_STREAM_RE = re.compile(r"\bstream=(?P<stream>\d+)")
 _AGENT_REASON_RE = re.compile(r"closing due to reason:\s*(?P<reason>[a-z_]+)")
+_AGENT_METHOD_RE = re.compile(r"\b(?P<cls>[A-Za-z][A-Za-z0-9]*)::(?P<method>[A-Za-z0-9_]+)\(\)")
+
+# Which side of the flow a log line is about. The agent names the subsystem it
+# was in, and that is a fact rather than an inference: `AppSocket*` lines are
+# about the socket facing the application, `NextTransport`/`Tunnel` lines are
+# about the leg facing Secure Access. This is *not* packet direction - the
+# correlation has no packet list - and the UI says so.
+_APP_SIDE_HINTS = ("appsocket", "socketread", "socketwrite", "connecttimeout", "onapp")
+_TUNNEL_SIDE_HINTS = ("nexttransport", "tunnel", "transportmgr", "http2", "proxy", "downstream")
+
+# How many events a single flow contributes before the middle is elided. A
+# reader needs the opening and the ending; the repetitive middle of a long
+# flow is what makes a ladder unreadable.
+_TIMELINE_EDGE = 18
 _AGENT_TS_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)")
 _AGENT_LEVEL_RE = re.compile(r"\s(?P<level>[IWE])/\s")
 
@@ -189,6 +203,11 @@ class AppFlow:
     reasons: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     error_lines: int = 0
+    events: tuple[tuple[datetime | None, str, str, str], ...] = ()
+    """Every line the agent wrote about this flow, in order, as
+    ``(when, level, side, message)``. This is the only ordered record any
+    artefact holds for an intercepted flow - the capture has packet counts but
+    the correlation does not read individual packets."""
 
     @property
     def label(self) -> str:
@@ -575,6 +594,7 @@ def extract_app_flows(zta_log_path: str) -> list[AppFlow]:
                     "reasons": [],
                     "errors": [],
                     "error_lines": 0,
+                    "events": [],
                 }
                 runs.append(rec)
             rec["lines"] += 1
@@ -599,6 +619,13 @@ def extract_app_flows(zta_log_path: str) -> list[AppFlow]:
                 if message not in rec["errors"]:
                     rec["errors"].append(message)
 
+            rec["events"].append((
+                when,
+                level["level"] if level else "I",
+                _agent_side(line),
+                _summarise_agent_line(line),
+            ))
+
     return [
         AppFlow(
             proto=rec["proto"],
@@ -611,10 +638,39 @@ def extract_app_flows(zta_log_path: str) -> list[AppFlow]:
             reasons=tuple(rec["reasons"]),
             errors=tuple(rec["errors"][:6]),
             error_lines=rec["error_lines"],
+            events=tuple(rec["events"]),
         )
         for key, runs in sorted(episodes.items())
         for rec in runs
     ]
+
+
+def _agent_side(line: str) -> str:
+    """Which leg of the flow this line is about, from the subsystem it names.
+
+    The agent states the class and method it was in, so this reads a fact
+    rather than guessing. The **method** is read first and the class second:
+    every one of these lines comes from ``AppSocketTransport``, so matching the
+    class would put the whole flow on one side and say nothing -
+    ``handleNextTransportStateChange`` is about the tunnel leg however app-ish
+    its class name looks.
+
+    This is not packet direction. The correlation never reads packets, and a
+    line saying the app socket closed is not a packet travelling anywhere.
+    """
+    match = _AGENT_METHOD_RE.search(line)
+    method = match["method"].lower() if match else ""
+    cls = match["cls"].lower() if match else line.lower()
+
+    if any(hint in method for hint in _TUNNEL_SIDE_HINTS):
+        return "tunnel"
+    if any(hint in method for hint in _APP_SIDE_HINTS):
+        return "app"
+    if any(hint in cls for hint in _TUNNEL_SIDE_HINTS):
+        return "tunnel"
+    if any(hint in cls for hint in _APP_SIDE_HINTS):
+        return "app"
+    return "agent"
 
 
 def _agent_time(line: str) -> datetime | None:
@@ -643,6 +699,12 @@ def _summarise_agent_line(line: str) -> str:
     text = re.sub(r"^[IWE]/\s*", "", text)
     text = re.sub(r"^\S+\.cpp:\d+\s*", "", text)
     text = _AGENT_FLOW_RE.sub("", text)
+    # The flow identifier is already the row this line is attached to, so
+    # repeating it in every event leaves no room for what the line actually
+    # says. Lambda suffixes are compiler noise for the same reason.
+    text = _AGENT_APP_RE.sub("", text)
+    text = re.sub(r"::<lambda[^>]*>", "", text)
+    text = re.sub(r"\bstream=\d+\s*", "", text)
     text = re.sub(r"\b[0-9A-F]{8}\b", "", text)
     return re.sub(r"\s{2,}", " ", text).strip(" -")[:200]
 
@@ -881,7 +943,46 @@ def _flow_payload(flow: FlowCorrelation) -> dict:
         "statuses": statuses,
         "explanation": _explain_flow(flow),
         "evidence": evidence,
+        "timeline": _flow_timeline(app),
     }
+
+
+def _flow_timeline(app: AppFlow) -> dict:
+    """The agent's own account of this flow, in order, ready to draw.
+
+    Shaped like the capture engine's packet timeline so the same ladder can
+    render it - but the events are **log lines, not packets**. The correlation
+    never reads individual packets, so the two lifelines are the leg facing the
+    application and the leg facing Secure Access, not a client and a server.
+    The caller states that on screen rather than letting the shape imply it.
+    """
+    events = list(app.events)
+    if not events:
+        return {"total": 0, "omitted": 0, "events": []}
+
+    start = next((when for when, _level, _side, _text in events if when), None)
+    omitted = 0
+    if len(events) > _TIMELINE_EDGE * 2:
+        omitted = len(events) - _TIMELINE_EDGE * 2
+        events = events[:_TIMELINE_EDGE] + events[-_TIMELINE_EDGE:]
+
+    rows = []
+    for index, (when, level, side, text) in enumerate(events):
+        if omitted and index == _TIMELINE_EDGE:
+            rows.append({"gap": omitted})
+        offset = None
+        if when is not None and start is not None:
+            offset = round((when - start).total_seconds(), 4)
+        rows.append({
+            "t": offset,
+            "side": side,
+            "level": level,
+            # The class is the same on every line of a flow, and the side chip
+            # already says which subsystem it was. Leading with the method
+            # leaves room for what the line actually reports.
+            "label": re.sub(r"^[A-Za-z][A-Za-z0-9]*::", "", text),
+        })
+    return {"total": len(app.events), "omitted": omitted, "events": rows}
 
 
 def _explain_flow(flow: FlowCorrelation) -> str:

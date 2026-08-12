@@ -20,6 +20,15 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **A flow timeline for each correlated flow**, drawn as the capture engine
+  draws a connection: a two-column fact grid, the artefact chain, then a ladder
+  between two lifelines. The rows are the agent's own log lines **in order, not
+  packets** - the correlation never reads individual packets - so the lifelines
+  are the leg facing the application and the leg facing Secure Access, taken
+  from the subsystem the agent named on each line. The diagram says that on
+  screen rather than letting a familiar shape imply a packet capture. Verified:
+  four ordered lines with alternating sides, endpoints "application · port
+  59682" and the tunnel, error rows marked.
 - **A Remove control on every evidence tile.** There was no way to take a file
   back once chosen, which is what made a browser-restored selection feel like
   the tool inventing data: the file was genuinely still attached and could not

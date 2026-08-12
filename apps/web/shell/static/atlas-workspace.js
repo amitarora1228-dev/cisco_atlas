@@ -1422,9 +1422,21 @@
         }
     }
 
-    /* The chain, one hop per artefact, each labelled with where it came from.
-     * A hop with no evidence says so rather than being omitted - a gap the
-     * reader cannot see is a gap they will assume was filled. */
+    /* The expanded row, in the shape the capture engine uses for a flow: a
+     * two-column fact grid, then the chain, then a ladder of what happened.
+     *
+     * The ladder is drawn with the engine's own classes, but its rows are the
+     * agent's **log lines, not packets** - the correlation never reads
+     * individual packets. So the lifelines are the leg facing the application
+     * and the leg facing Secure Access, and the diagram says so rather than
+     * letting a familiar shape imply a packet capture.
+     */
+    function kv(label, value) {
+        if (value === null || value === undefined || value === "") return "";
+        return "<div class=\"kv\"><b>" + esc(label) + "</b>"
+            + "<span class=\"mono\">" + esc(value) + "</span></div>";
+    }
+
     function flowDetailHtml(flow) {
         var hops = [
             ["Browser", "har", flow.requests
@@ -1439,7 +1451,40 @@
             ["Tunnel", "bundle", flow.tunnel || "not identified"]
         ];
 
-        var html = "<p class=\"atlas-flow-why\">" + esc(flow.explanation) + "</p>";
+        var statuses = Object.keys(flow.statuses || {}).map(function (code) {
+            return flow.statuses[code] + " x " + code;
+        }).join(", ");
+
+        var html = "<div class=\"detail-inner\">";
+
+        html += "<div class=\"detail-block\"><h4>Intercepted flow</h4>"
+            + kv("Destination", flow.destination)
+            + kv("Agent flow", flow.label)
+            + kv("Source port", flow.src_port)
+            + kv("Protocol", flow.protocol)
+            + kv("Stream", flow.stream)
+            + kv("First seen", flow.first_seen)
+            + kv("Last seen", flow.last_seen)
+            + kv("Agent log lines", flow.agent_lines)
+            + kv("Close reason", flow.reasons.join(", "))
+            + "</div>";
+
+        html += "<div class=\"detail-block\"><h4>What each artefact saw</h4>"
+            + kv("Tunnel", flow.tunnel || "not identified")
+            + kv("On the wire", flow.wire
+                ? flow.wire.label + " · " + flow.wire.packets + " packet(s)"
+                : "not in the capture")
+            + kv("Listener", flow.wire ? flow.wire.listener : null)
+            + kv("Handshake captured", flow.wire ? (flow.wire.handshake_captured ? "yes" : "no") : null)
+            + kv("Browser requests", flow.requests || null)
+            + kv("Failed requests", flow.failures || null)
+            + kv("Status codes", statuses)
+            + "</div>";
+
+        html += "</div>";
+
+        html += "<p class=\"atlas-flow-why\">" + esc(flow.explanation) + "</p>";
+
         html += "<div class=\"atlas-flow-chain\">";
         hops.forEach(function (hop) {
             html += "<div class=\"atlas-flow-hop" + (/^not /.test(hop[2]) ? " is-missing" : "") + "\">"
@@ -1449,25 +1494,54 @@
         });
         html += "</div>";
 
+        html += flowLadder(flow);
+
         html += "<div class=\"atlas-flow-basis\">";
         [flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
             if (text) html += "<p>" + esc(text) + "</p>";
         });
         html += "</div>";
-
-        var statuses = Object.keys(flow.statuses || {});
-        if (statuses.length) {
-            html += "<div class=\"atlas-flow-basis\"><p>The browser recorded: "
-                + statuses.map(function (code) {
-                    return esc(flow.statuses[code]) + " x " + esc(code);
-                }).join(", ") + ".</p></div>";
-        }
-
-        (flow.agent_errors || []).slice(0, 4).forEach(function (line) {
-            html += "<div class=\"atlas-corr-event is-error\">"
-                + "<span class=\"atlas-corr-event-tag\">agent</span><span>" + esc(line) + "</span></div>";
-        });
         return html;
+    }
+
+    function flowLadder(flow) {
+        var timeline = flow.timeline || {};
+        var events = timeline.events || [];
+        if (!events.length) return "";
+
+        var rows = events.map(function (event, index) {
+            if (event.gap) {
+                return "<div class=\"lad-gap\" style=\"--i:" + index + "\">&ctdot; "
+                    + esc(event.gap) + " line(s) omitted &ctdot;</div>";
+            }
+            // The application leg on the left, the Secure Access leg on the
+            // right, matching the lifelines named above.
+            var dir = event.side === "tunnel" ? "s2c" : "c2s";
+            var bad = event.level === "E";
+            return "<div class=\"lad-row dir-" + dir + (bad ? " lad-bad" : "")
+                + "\" style=\"--i:" + index + "\">"
+                + "<span class=\"lad-t\">" + esc(event.t === null || event.t === undefined
+                    ? "—" : event.t + "s") + "</span>"
+                + "<span class=\"lad-wire\"><span class=\"lad-dot\"></span>"
+                + "<span class=\"lad-label\">" + esc(event.label) + "</span>"
+                + (bad ? "<span class=\"lad-anom\">error</span>" : "")
+                + "</span></div>";
+        }).join("");
+
+        var note = timeline.omitted
+            ? timeline.total + " log lines · middle " + timeline.omitted + " omitted"
+            : timeline.total + " log line" + (timeline.total === 1 ? "" : "s");
+
+        return "<div class=\"detail-block ladder-block\">"
+            + "<h4>Flow timeline <span class=\"lad-note\">(" + esc(note) + ")</span></h4>"
+            + "<p class=\"atlas-corr-blurb\">These are the agent's own log lines for this flow, "
+            + "in order - not packets. The correlation does not read individual packets, so the "
+            + "two sides are the leg facing the application and the leg facing Secure Access, "
+            + "taken from the subsystem the agent named on each line.</p>"
+            + "<div class=\"ladder\"><div class=\"lad-head\">"
+            + "<span class=\"lad-ep lad-ep-c\">application · port " + esc(flow.src_port) + "</span>"
+            + "<span class=\"lad-ep lad-ep-s\">" + esc(flow.tunnel || "Secure Access") + "</span>"
+            + "</div><div class=\"lad-body\">" + rows + "</div></div></div>";
     }
 
     function renderCorrelation(data) {

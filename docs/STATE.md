@@ -517,6 +517,11 @@ Every one of these was a real failure here, not a hypothetical.
   to `textContent` and returns everything, so a measurement taken while the
   block was hidden looked correct and hid the bug. Use `readableText`, which
   opens collapsed sections, reads, and restores them.
+- **A hidden engine panel makes every measurement zero.** Heights, positions and
+  `getBoundingClientRect` all read 0 for anything inside the engine that is not
+  `is-active`, while `getComputedStyle` still reports the intended values. A
+  ladder measured at 26 px per row and 0 px on screen is not broken - it is in
+  the wrong panel. Switch to the panel before measuring geometry.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

@@ -20,6 +20,17 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **Each flow says what handled it**, in a fixed order of precedence: ZTA, then
+  RA VPN, then Umbrella, then local breakout. The order matters because the
+  tests overlap - a flow inside a VPN tunnel still has a real destination, and
+  an Umbrella-steered flow still leaves the machine normally - so the most
+  specific evidence is taken first. ZTA is direct evidence (the bundle names
+  the flow, or it went to the listener the bundle accounts for); Umbrella and
+  Secure Access are named addresses; a VPN is reported as *consistent with*
+  rather than proven, because a capture cannot read an adapter's name. Measured
+  on the YouTube session: 382 ZTA, 3 local breakout, `accounts.youtube.com`
+  correctly identified as going straight to 142.251.218.142 from the machine's
+  own address.
 - **A real packet ladder for every correlated flow the capture holds.** An
   intercepted flow has a real client and a real server - the application on one
   side, the destination it asked for on the other - so it has a real packet

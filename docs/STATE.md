@@ -247,7 +247,6 @@ session, what no single artefact can:
 These are not presented as equal, in the UI or the payload.
 
 ### Following one flow end to end
-
 The ZTA log writes **two** differently punctuated identifiers, and only one of
 them was being read at first:
 

@@ -1328,7 +1328,7 @@
         var table = el("table", "ftable");
         table.innerHTML = "<thead><tr>"
             + "<th></th><th>Time</th><th>Severity</th><th>Source</th>"
-            + "<th>Destination asked for</th><th>Carried by</th><th>Protocol</th>"
+            + "<th>Destination asked for</th><th>Intercepted by</th><th>Carried by</th>"
             + "<th>On the wire</th><th>Error / Issue</th>"
             + "</tr></thead>";
         var body = document.createElement("tbody");
@@ -1390,11 +1390,10 @@
                 + "<td class=\"mono\">port " + esc(flow.src_port) + "</td>"
                 + "<td class=\"sni-cell\">" + esc(flow.destination)
                 + (flow.requests ? " <span class=\"badge badge-har\">HAR</span>" : "") + "</td>"
+                + "<td>" + (flow.intercepted_by
+                    ? esc(flow.intercepted_by) : "<span class=\"muted\">not determined</span>") + "</td>"
                 + "<td class=\"mono\">" + (flow.tunnel
                     ? esc(flow.tunnel) : "<span class=\"muted\">not identified</span>") + "</td>"
-                + "<td>" + esc(flow.protocol)
-                + (flow.stream === null || flow.stream === undefined
-                    ? "" : " <span class=\"muted\">stream " + esc(flow.stream) + "</span>") + "</td>"
                 + "<td class=\"mono\">" + (flow.wire
                     ? esc(flow.wire.packets) + " pkt"
                     : "<span class=\"muted\">not captured</span>") + "</td>"
@@ -1470,6 +1469,7 @@
             + "</div>";
 
         html += "<div class=\"detail-block\"><h4>What each artefact saw</h4>"
+            + kv("Intercepted by", flow.intercepted_by)
             + kv("Tunnel", flow.tunnel || "not identified")
             + kv("On the wire", flow.wire
                 ? flow.wire.label + " · " + flow.wire.packets + " packet(s)"
@@ -1497,7 +1497,7 @@
         html += flowLadder(flow);
 
         html += "<div class=\"atlas-flow-basis\">";
-        [flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
+        [flow.intercepted_basis, flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
             if (text) html += "<p>" + esc(text) + "</p>";
         });
         html += "</div>";

@@ -299,6 +299,8 @@ class FlowCorrelation:
     tunnel: AgentFlow | None = None
     tunnel_basis: str = ""
     requests: list[WebRequest] = field(default_factory=list)
+    intercepted_by: str = ""
+    intercepted_basis: str = ""
 
     @property
     def failures(self) -> list[WebRequest]:
@@ -994,6 +996,8 @@ def _flow_payload(flow: FlowCorrelation) -> dict:
             "bundle" if app is not None
             else ("capture" if flow.wire is not None else "har")
         ),
+        "intercepted_by": flow.intercepted_by,
+        "intercepted_basis": flow.intercepted_basis,
         "wire": (
             {
                 "label": flow.wire.label,
@@ -1462,6 +1466,33 @@ def _correlate_flows(
     # be shown packet by packet - the strongest evidence this tool produces.
     # Within each group the worst come first, so the ordering is "what can be
     # proven, then what went wrong" rather than one at the expense of the other.
+    # Which agent intercepted each flow.
+    #
+    # The bundle names the flows the ZTA agent handled, and the capture shows
+    # which local port those went to. That port *is* the ZTA listener - not by
+    # assumption but because the two artefacts agree on the same connections -
+    # so any other loopback flow to the same port was intercepted by the same
+    # agent. Traffic to a different local port is some other agent, and this
+    # will not guess which: the capture engine names vendors from the
+    # certificate issuer, which is evidence this join does not read.
+    listener_ports: dict[int, int] = defaultdict(int)
+    for record in correlated:
+        if record.app is not None and record.wire is not None and record.wire.is_loopback:
+            listener_ports[record.wire.dst_port] += 1
+    zta_listener = max(listener_ports, key=listener_ports.get) if listener_ports else None
+
+    # The address this machine normally sends from. A flow leaving from a
+    # different one is the shape of a second adapter, which is how a VPN
+    # tunnel appears in a capture taken on the endpoint.
+    client_ips: dict[str, int] = defaultdict(int)
+    for wire in wire_flows:
+        if not wire.is_loopback:
+            client_ips[wire.src_ip] += 1
+    local_client_ip = max(client_ips, key=client_ips.get) if client_ips else None
+
+    for record in correlated:
+        _attribute_interception(record, zta_listener, local_client_ip)
+
     order = {"problem": 0, "warning": 1, "info": 2}
     correlated.sort(
         key=lambda f: (
@@ -1494,6 +1525,106 @@ def _correlate_flows(
         )
 
     return correlated
+
+
+def _attribute_interception(
+    flow: FlowCorrelation, zta_listener: int | None, local_client_ip: str | None
+) -> None:
+    """Name what handled this flow, in a fixed order of precedence.
+
+    ZTA, then RA VPN, then Umbrella, then local breakout. The order matters
+    because the tests overlap: a flow inside a VPN tunnel still has a real
+    destination address, and an Umbrella-steered flow still leaves the machine
+    normally. Taking the most specific evidence first stops a weaker signal
+    claiming a flow a stronger one already explains.
+
+    Each step states what it saw. Where the evidence only *fits* a product
+    rather than naming it, the wording says "consistent with" - the capture
+    cannot see a VPN adapter's name, and inventing certainty here would be the
+    easiest place in this tool to be confidently wrong.
+    """
+    from capture_inspector.dns_analysis import PUBLIC_DNS_RESOLVERS
+    from capture_inspector.secure_access import describe as describe_ingress
+
+    # 1. ZTA - the bundle names the flow, or it went to the listener the
+    #    bundle accounts for. Both are direct evidence, not inference.
+    if flow.app is not None:
+        flow.intercepted_by = "Cisco Secure Client - Zero Trust Access"
+        flow.intercepted_basis = (
+            "The bundle's Zero Trust Access log names this flow, so the ZTA agent handled it."
+        )
+        return
+
+    if flow.wire is None:
+        flow.intercepted_basis = "No captured connection, so nothing here shows what handled it."
+        return
+
+    if flow.wire.is_loopback and zta_listener is not None and flow.wire.dst_port == zta_listener:
+        flow.intercepted_by = "Cisco Secure Client - Zero Trust Access"
+        flow.intercepted_basis = (
+            f"This connection went to 127.0.0.1:{zta_listener}, the same local listener the "
+            "bundle's ZTA log accounts for on other flows."
+        )
+        return
+
+    peer = flow.wire.dst_ip
+
+    # 2. RA VPN - the packets left through a different local adapter. The
+    #    capture cannot read an adapter's name, so this is the shape of a
+    #    tunnel rather than proof of one.
+    if (
+        not flow.wire.is_loopback
+        and local_client_ip
+        and flow.wire.src_ip != local_client_ip
+    ):
+        flow.intercepted_by = "consistent with a VPN tunnel (RA VPN)"
+        flow.intercepted_basis = (
+            f"This connection left from {flow.wire.src_ip}, while the rest of this capture uses "
+            f"{local_client_ip}. A second local address is what a VPN tunnel adapter looks like, "
+            "though the capture cannot name the adapter, so this is the shape of a tunnel rather "
+            "than proof of one."
+        )
+        return
+
+    # 3. Umbrella - either its resolvers, or a Secure Access ingress. Both are
+    #    named addresses, so both can be stated rather than suggested.
+    resolver = PUBLIC_DNS_RESOLVERS.get(peer)
+    if resolver and ("umbrella" in resolver.lower() or "opendns" in resolver.lower()):
+        flow.intercepted_by = "Cisco Umbrella"
+        flow.intercepted_basis = (
+            f"The connection went to {peer}, a {resolver} resolver, so Umbrella handled it."
+        )
+        return
+
+    ingress = describe_ingress(peer)
+    if ingress:
+        flow.intercepted_by = "Cisco Secure Access (network path)"
+        flow.intercepted_basis = (
+            f"The connection went to {peer}, a {ingress}. It was steered over the network rather "
+            "than by a listener on this machine."
+        )
+        return
+
+    if flow.wire.is_loopback:
+        flow.intercepted_by = f"a local agent on 127.0.0.1:{flow.wire.dst_port}"
+        flow.intercepted_basis = (
+            "The connection was terminated by an agent on this machine, but not on the port the "
+            "ZTA log accounts for"
+            + (f" ({zta_listener})" if zta_listener is not None else "")
+            + ". Which product that is, is written in the certificate it presented - the capture "
+            "engine's Certs view names it; this join does not read certificates."
+        )
+        return
+
+    # 4. Local breakout - nothing above explains it.
+    flow.intercepted_by = "local breakout"
+    flow.intercepted_basis = (
+        f"The application connected straight to {peer}:{flow.wire.dst_port} from "
+        f"{flow.wire.src_ip}: no local listener, no recognised Umbrella resolver and no known "
+        "Secure Access ingress. Nothing in these inputs steered it. A proxy this build does not "
+        "recognise would look the same, so this is what the evidence shows rather than a "
+        "guarantee that nothing inspected it."
+    )
 
 
 def _overlapping(

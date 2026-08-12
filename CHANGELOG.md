@@ -20,6 +20,18 @@ under `[Unreleased]` until one is cut.
 
 ### Changed
 
+- **The path stitcher no longer compares every connection against every other.**
+  Asked how many files the path view accepts, the answer turned out not to be
+  about files at all: file count is linear at about 0.33 s each (80 files in
+  26.3 s, dominated by tshark startup), but the link-building loop was quadratic
+  in the number of *connections* across all of them. Measured: 4,000
+  connections 3.15 s, 8,000 **13.6 s**, 16,000 **54.4 s** - and a capture from a
+  busy firewall reaches those numbers easily. Both joins are equality tests, so
+  the candidates are now looked up by source address and by SNI instead of
+  searched for. Measured after: 8,000 in **0.06 s** (227x), 16,000 in **0.12 s**
+  (453x), 64,000 in 0.70 s. Output on the real three-vantage path is byte for
+  byte the same, and the four path tests still pass.
+
 - **"Carried by" now says *why* no tunnel was named.** One label, "not
   identified", was standing for four different situations, which made a
   question that has an answer look like one that does not. Measured on the

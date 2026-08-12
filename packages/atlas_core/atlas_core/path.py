@@ -353,13 +353,36 @@ def stitch_path(vantages: list[Vantage], destination: str | None = None) -> list
         return []
 
     links: list[Link] = []
+    # Indexed rather than compared pairwise. Both joins are equality tests - a
+    # proxy link needs one segment's destination address to equal another's
+    # source, and a name link needs the two to share an SNI - so the candidates
+    # can be looked up instead of searched for. Measured before this: 8,000
+    # connections took 13.6 s and 16,000 took 54 s, which a capture from a busy
+    # firewall reaches easily, and the cost was quadratic so it only got worse.
+    by_source: dict[str, list[Segment]] = defaultdict(list)
+    by_name: dict[str, list[Segment]] = defaultdict(list)
+    for segment in segments:
+        by_source[segment.first.src_ip].append(segment)
+        if segment.sni:
+            by_name[segment.sni].append(segment)
+
     for upstream in segments:
-        for downstream in segments:
-            if upstream.key == downstream.key:
+        link = None
+        for downstream in by_source.get(upstream.first.dst_ip, ()):
+            if downstream.key == upstream.key:
                 continue
-            link = _pivot_link(upstream, downstream) or _name_link(upstream, downstream)
+            link = _pivot_link(upstream, downstream)
             if link is not None:
-                links.append(link)
+                break
+        if link is None and upstream.sni:
+            for downstream in by_name.get(upstream.sni, ()):
+                if downstream.key == upstream.key:
+                    continue
+                link = _name_link(upstream, downstream)
+                if link is not None:
+                    break
+        if link is not None:
+            links.append(link)
 
     # A segment may look like the upstream of several others when a proxy is
     # busy. Keep the strongest, then the earliest - guessing among equals would

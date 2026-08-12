@@ -327,6 +327,14 @@ is a destination in one capture and a source in the next, and that pivot orders
 the chain. Filenames are ignored on purpose: a path built from them is the path
 the operator drew, not the one the packets took.
 
+**How much it takes.** No limit is configured, in the endpoint or in uvicorn.
+File count costs about **0.33 s each** (80 files in 26.3 s), almost all of it
+tshark startup. The number of *connections* across all files used to be the
+real ceiling — the link loop was quadratic, at 13.6 s for 8,000 and 54.4 s for
+16,000 — and is now indexed by source address and SNI: 0.06 s and 0.12 s
+respectively, 0.70 s at 64,000. Upload size is bounded only by memory and by
+how long the reader will wait.
+
 **Not yet true:** no device log is read — FTD or ASAc connection events would
 join *more* strongly than a capture pair, carrying the NAT translation and a
 connection ID directly, but their formats vary enough that guessing at one

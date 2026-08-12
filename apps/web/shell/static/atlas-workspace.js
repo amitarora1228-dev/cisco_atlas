@@ -202,7 +202,24 @@
     function wireEvidenceTiles() {
         EVIDENCE_TILES.forEach(function (tile) {
             var input = document.querySelector(tile.input);
-            if (input) input.addEventListener("change", refreshEvidenceTiles);
+            if (!input) return;
+            // A reload starts over.
+            //
+            // Firefox restores file input selections across a reload, the way
+            // it restores text typed into a field. Chromium does not, which is
+            // why the browser harness cannot see this. The result was a
+            // half-state: the files survived but their results did not, so an
+            // apparently empty page would analyse artefacts the reader believed
+            // they had never supplied - reported three times, each time as the
+            // tool inventing data.
+            //
+            // Showing the restored files instead of hiding them was the first
+            // attempt and was not enough; a reload is the one gesture everyone
+            // means as "start again". Selections are therefore dropped at
+            // startup. Nothing is lost that a reload was not already discarding,
+            // and Remove exists for taking a file back without reloading.
+            input.value = "";
+            input.addEventListener("change", refreshEvidenceTiles);
         });
         refreshEvidenceTiles();
     }

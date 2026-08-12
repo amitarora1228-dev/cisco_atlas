@@ -59,6 +59,16 @@ under `[Unreleased]` until one is cut.
 
 ### Changed
 
+- **A reload now starts over.** Firefox restores file input selections across a
+  reload, the way it restores text typed into a field; Chromium does not, which
+  is why the browser harness could not see it. The result was a half-state - the
+  files survived but their results did not - so an apparently empty page would
+  analyse artefacts the reader believed they had never supplied. Showing the
+  restored files rather than hiding them was the first attempt and was not
+  enough: reported three times. Selections are now dropped at startup. Nothing
+  is lost that a reload was not already discarding, and Remove takes a file back
+  without one. Verified: two files loaded, reload leaves zero and both tiles
+  read "no file selected".
 - **Analyze no longer moves the view** when doing so would hide a result the same
   click produced - but it does land on the bundle results when the bundle is the
   only artefact supplied, because there is then nothing to hide.

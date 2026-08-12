@@ -506,9 +506,10 @@ Every one of these was a real failure here, not a hypothetical.
   restore file input selections across a reload - Firefox does, Chromium does
   not, which is why the browser harness cannot reproduce it - so an input can
   hold a capture while its tile reads "no file selected", and a correct
-  correlation over three artefacts looks invented. Labels are synced from the
-  inputs at startup and each tile has a Remove control. Anything reasoning
-  about what is loaded must read `input.files`, never the label.
+  correlation over three artefacts looks invented. Selections are now cleared
+  at startup so a reload starts over, labels are rebuilt from `input.files`, and
+  each tile has a Remove control. Anything reasoning about what is loaded must
+  read `input.files`, never the label.
 - **`innerText` omits collapsed `<details>`, and its fallback hides the fact.**
   It returns what is rendered, so text inside a closed `<details>` is missing -
   which made an export from the bundle page 1,695 characters instead of 387,331.

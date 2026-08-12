@@ -1355,6 +1355,25 @@
         return section;
     }
 
+    /* Why no tunnel was named, in the width of a cell.
+     *
+     * This read "not identified" for four different situations, which made a
+     * question that has an answer look like one that does not. A flow the
+     * agent never logged can never be attributed to a tunnel from these
+     * inputs; a flow whose stream several tunnels claim is ambiguous and might
+     * be settled by a longer log. Telling the reader which one they are
+     * looking at is the difference between a gap and a limit. The full
+     * sentence is on the cell as a tooltip and in the expanded row.
+     */
+    function tunnelGap(flow) {
+        var basis = flow.tunnel_basis || "";
+        if (/logged nothing about this flow/.test(basis)) return "agent silent";
+        if (/tunnels report stream/.test(basis)) return "ambiguous";
+        if (/no tunnel in the log reports/.test(basis)) return "not in log";
+        if (/did not record a stream/.test(basis)) return "no stream";
+        return "not identified";
+    }
+
     function renderFlowRows(body, empty, flows) {
         body.innerHTML = "";
         var rows = flows.filter(function (flow) {
@@ -1394,7 +1413,9 @@
                 + "<td>" + (flow.intercepted_by
                     ? esc(flow.intercepted_by) : "<span class=\"muted\">not determined</span>") + "</td>"
                 + "<td class=\"mono\">" + (flow.tunnel
-                    ? esc(flow.tunnel) : "<span class=\"muted\">not identified</span>") + "</td>"
+                    ? esc(flow.tunnel)
+                    : "<span class=\"muted\" title=\"" + esc(flow.tunnel_basis || "")
+                        + "\">" + esc(tunnelGap(flow)) + "</span>") + "</td>"
                 + "<td class=\"mono\">" + (flow.wire
                     ? esc(flow.wire.packets) + " pkt"
                     : "<span class=\"muted\">not captured</span>") + "</td>"

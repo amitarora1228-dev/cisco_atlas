@@ -18,6 +18,21 @@ under `[Unreleased]` until one is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **"Carried by" now says *why* no tunnel was named.** One label, "not
+  identified", was standing for four different situations, which made a
+  question that has an answer look like one that does not. Measured on the
+  session in hand (385 flows, 269 joined): 57 flows the agent never logged at
+  all - named by the capture, so no stream exists to join on and none ever
+  will; 38 where the agent recorded a stream no tunnel reports; 23 where
+  several tunnels report that stream, because HTTP/2 stream numbers restart per
+  connection and stream 1 alone appears 160 times in this log; 10 with no
+  stream recorded. The cell now reads `agent silent`, `not in log`,
+  `ambiguous` or `no stream`, with the full sentence as a tooltip and in the
+  expanded row. The distinction matters because one of those is a permanent
+  limit of the inputs and the others might be settled by a longer log.
+
 ### Added
 
 - **An end-to-end path view.** Captures taken at several points of a path -

@@ -20,6 +20,7 @@
     var BUNDLE = "atlas-engine-bundle";
     var CORRELATE = "atlas-engine-correlate";
     var PATH = "atlas-engine-path";
+    var REPORT = "atlas-engine-report";
 
     /* The bundle engine posts to root-relative paths (/analyze, /inspect-bundle,
      * ...) because standalone it owns the origin. Here it is mounted under
@@ -1756,6 +1757,8 @@
                 lastCorrelation = data;
                 renderCorrelation(data);
                 renderReportView();
+                recordRun(data);
+                renderReportWorkspace();
                 // Said again on completion because the bundle engine clears the
                 // notice when its own results land, and a pointer the reader
                 // never saw is the same as no pointer.
@@ -2000,11 +2003,314 @@
         return view;
     }
 
+    /* ---- report & history ------------------------------------------------ */
+
+    /* The report used to be a wall of text appended to the capture engine's
+     * page: everything or nothing, no way to see what you were about to send
+     * anyone, and a Download button that produced something you had not read.
+     * This is the same content, but the reader chooses what goes in, sees it
+     * before it leaves, and can copy it as well as download it.
+     *
+     * History is the other half. An analysis was previously lost the moment the
+     * next one started, so comparing two runs meant running one twice. Records
+     * are kept in this browser only - never uploaded - and the view says so,
+     * because a capture and a bundle together identify an endpoint and a
+     * retained report carries the hostnames from both.
+     */
+    var HISTORY_KEY = "atlas_history";
+    var HISTORY_MAX = 25;
+    var HISTORY_TEXT_CAP = 400000;
+    var reportChoice = {};
+
+    function historyLoad() {
+        try {
+            var raw = window.localStorage.getItem(HISTORY_KEY);
+            var list = raw ? JSON.parse(raw) : [];
+            return Array.isArray(list) ? list : [];
+        } catch (err) {
+            return [];
+        }
+    }
+
+    function historySave(list) {
+        /* localStorage is about 5 MB and one report of a real session measured
+         * 676 KB, so a naive save fills the store after a handful of runs and
+         * then throws. Swallowing that would be the worst outcome: history
+         * would stop recording and still look like it was working. Instead,
+         * give up the oldest records first, then the report bodies, and only
+         * then admit defeat - a list of runs with no text is still worth more
+         * than an empty one.
+         */
+        var trimmed = list.slice(0, HISTORY_MAX);
+        for (var keep = trimmed.length; keep > 0; keep--) {
+            try {
+                window.localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed.slice(0, keep)));
+                return;
+            } catch (err) {
+                /* try again with one fewer record */
+            }
+        }
+        try {
+            window.localStorage.setItem(HISTORY_KEY, JSON.stringify(
+                trimmed.map(function (rec) {
+                    var copy = {};
+                    Object.keys(rec).forEach(function (k) { if (k !== "text") copy[k] = rec[k]; });
+                    copy.text = "";
+                    copy.dropped = true;
+                    return copy;
+                }).slice(0, HISTORY_MAX)
+            ));
+        } catch (err) {
+            /* The store is unavailable entirely - private browsing, or disabled.
+             * The run itself is unaffected, which is the part that matters. */
+        }
+    }
+
+    function historyAdd(record) {
+        var list = historyLoad();
+        list.unshift(record);
+        historySave(list);
+        renderHistory();
+    }
+
+    function recordRun(data) {
+        var files = correlationFiles();
+        var summary = (data && data.summary) || {};
+        var text = buildWorkspaceReport();
+        historyAdd({
+            id: String(Date.now()),
+            at: new Date().toISOString(),
+            files: {
+                capture: files.capture ? files.capture.name : null,
+                har: files.har ? files.har.name : null,
+                bundle: files.bundle ? files.bundle.name : null
+            },
+            summary: {
+                hosts: summary.hosts || 0,
+                flows: summary.intercepted_flows || 0,
+                failing: summary.failing_flows || 0,
+                requests: summary.requests || 0,
+                failures: summary.failures || 0
+            },
+            text: text.length > HISTORY_TEXT_CAP ? text.slice(0, HISTORY_TEXT_CAP) + "\n[truncated]" : text
+        });
+    }
+
+    function reportPreviewText() {
+        var files = correlationFiles();
+        var rule = new Array(72).join("=");
+        var out = [
+            "ATLAS - Cisco endpoint and network diagnostics",
+            rule,
+            "Generated: " + new Date().toISOString(),
+            "",
+            "Evidence analysed",
+            "  capture: " + (files.capture ? files.capture.name : "not supplied"),
+            "  HAR    : " + (files.har ? files.har.name : "not supplied"),
+            "  bundle : " + (files.bundle ? files.bundle.name : "not supplied")
+        ];
+        var chosen = reportSections().filter(function (pair) {
+            return reportChoice[pair[0]] !== false;
+        });
+        if (!chosen.length) {
+            out.push("", "Nothing is selected, so this report has no content.");
+            return out.join("\n");
+        }
+        chosen.forEach(function (pair) {
+            out.push("", rule, pair[0].toUpperCase(), rule, "", pair[1]);
+        });
+        return out.join("\n");
+    }
+
+    function downloadText(text, name) {
+        var blob = new Blob([text], { type: "text/plain" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        link.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function renderReportWorkspace() {
+        var host = document.getElementById("atlas-report-body");
+        if (!host) return;
+        host.innerHTML = "";
+
+        var sections = reportSections();
+        if (!sections.length) {
+            host.appendChild(el(
+                "p",
+                "atlas-corr-blurb",
+                "Nothing has been analysed yet. Load evidence and press Analyze; this view then "
+                    + "shows exactly what a report would contain, before you send it anywhere."
+            ));
+            return;
+        }
+
+        var picker = el("div", "atlas-report-picker");
+        picker.appendChild(el("span", "atlas-report-picker-label", "Include"));
+        sections.forEach(function (pair) {
+            var id = "atlas-rep-" + pair[0].replace(/\W+/g, "-");
+            var wrap = el("label", "atlas-report-chip");
+            var box = document.createElement("input");
+            box.type = "checkbox";
+            box.id = id;
+            box.checked = reportChoice[pair[0]] !== false;
+            box.addEventListener("change", function () {
+                reportChoice[pair[0]] = box.checked;
+                renderReportWorkspace();
+            });
+            wrap.appendChild(box);
+            wrap.appendChild(el("span", null, pair[0]));
+            wrap.appendChild(el("span", "atlas-report-size",
+                Math.round(pair[1].length / 1024) + " KB"));
+            picker.appendChild(wrap);
+        });
+        host.appendChild(picker);
+
+        var text = reportPreviewText();
+
+        var bar = el("div", "atlas-report-actions");
+        var copy = el("button", "atlas-corr-run", "Copy");
+        copy.type = "button";
+        var copied = el("span", "atlas-corr-status");
+        copied.setAttribute("role", "status");
+        copy.addEventListener("click", function () {
+            navigator.clipboard.writeText(text).then(
+                function () { copied.textContent = "Copied " + text.length + " characters."; },
+                function () { copied.textContent = "The browser refused clipboard access."; }
+            );
+        });
+        var save = el("button", "atlas-corr-run", "Download (.txt)");
+        save.type = "button";
+        save.addEventListener("click", function () { downloadText(text, "atlas-report.txt"); });
+        bar.appendChild(save);
+        bar.appendChild(copy);
+        bar.appendChild(copied);
+        host.appendChild(bar);
+
+        host.appendChild(el("p", "atlas-corr-blurb",
+            "This is the whole report, exactly as it will be saved - " + text.length
+                + " characters."));
+
+        var pre = el("pre", "atlas-report-preview");
+        pre.textContent = text;
+        host.appendChild(pre);
+    }
+
+    function renderHistory() {
+        var host = document.getElementById("atlas-history-body");
+        if (!host) return;
+        host.innerHTML = "";
+
+        var list = historyLoad();
+        if (!list.length) {
+            host.appendChild(el("p", "atlas-corr-blurb",
+                "No runs recorded yet. Each analysis is added here when it finishes."));
+            return;
+        }
+
+        var bar = el("div", "atlas-report-actions");
+        var clear = el("button", "atlas-corr-run", "Delete all " + list.length + " record(s)");
+        clear.type = "button";
+        clear.addEventListener("click", function () {
+            historySave([]);
+            renderHistory();
+        });
+        bar.appendChild(clear);
+        host.appendChild(bar);
+
+        list.forEach(function (rec) {
+            var row = el("div", "atlas-hist");
+            var head = el("div", "atlas-hist-head");
+            var names = [rec.files.capture, rec.files.har, rec.files.bundle]
+                .filter(Boolean).join(", ") || "no files recorded";
+            head.appendChild(el("span", "atlas-hist-when",
+                new Date(rec.at).toLocaleString()));
+            head.appendChild(el("span", "atlas-hist-files", names));
+            row.appendChild(head);
+
+            var stats = el("div", "atlas-hist-stats");
+            [["hosts", rec.summary.hosts], ["flows", rec.summary.flows],
+             ["failing flows", rec.summary.failing], ["requests", rec.summary.requests],
+             ["failed requests", rec.summary.failures]].forEach(function (pair) {
+                if (!pair[1]) return;
+                var chip = el("span", "atlas-hist-chip");
+                chip.appendChild(el("b", null, String(pair[1])));
+                chip.appendChild(el("span", null, " " + pair[0]));
+                stats.appendChild(chip);
+            });
+            row.appendChild(stats);
+
+            var acts = el("div", "atlas-hist-acts");
+            var dl = el("button", "atlas-hist-btn", "Download");
+            dl.type = "button";
+            dl.disabled = !rec.text;
+            dl.addEventListener("click", function () {
+                downloadText(rec.text || "", "atlas-report-" + rec.id + ".txt");
+            });
+            var view = el("button", "atlas-hist-btn", rec.text ? "View" : "Text not kept");
+            view.type = "button";
+            view.disabled = !rec.text;
+            var pre = el("pre", "atlas-report-preview hidden");
+            pre.textContent = rec.text || "";
+            view.addEventListener("click", function () {
+                pre.classList.toggle("hidden");
+                view.textContent = pre.classList.contains("hidden") ? "View" : "Hide";
+            });
+            var del = el("button", "atlas-hist-btn", "Delete");
+            del.type = "button";
+            del.addEventListener("click", function () {
+                historySave(historyLoad().filter(function (r) { return r.id !== rec.id; }));
+                renderHistory();
+            });
+            acts.appendChild(view);
+            acts.appendChild(dl);
+            acts.appendChild(del);
+            row.appendChild(acts);
+            row.appendChild(pre);
+            host.appendChild(row);
+        });
+    }
+
+    function buildReportWorkspaceView() {
+        var view = el("div", "atlas-engine atlas-corr");
+        view.id = REPORT;
+
+        var head = el("header", "atlas-corr-head");
+        head.appendChild(el("h2", null, "Report"));
+        head.appendChild(el("p", null,
+            "Everything the workspace has established, in one document. Choose what goes in, "
+                + "read it here before it leaves, then copy or download it. What you see is "
+                + "exactly what is saved - the preview and the file are built from the same call, "
+                + "so a report can never promise something this view did not show."));
+        view.appendChild(head);
+
+        var body = el("div", null);
+        body.id = "atlas-report-body";
+        view.appendChild(body);
+
+        var histHead = el("header", "atlas-corr-head atlas-hist-head-block");
+        histHead.appendChild(el("h2", null, "History"));
+        histHead.appendChild(el("p", null,
+            "Every analysis run in this browser, most recent first, so two runs can be compared "
+                + "without running one of them again. These records are held in this browser "
+                + "only and are never uploaded - but they do contain the hostnames and addresses "
+                + "from the evidence, so delete them when you are finished with a case."));
+        view.appendChild(histHead);
+
+        var hist = el("div", null);
+        hist.id = "atlas-history-body";
+        view.appendChild(hist);
+        return view;
+    }
+
     /* ---- navigation ------------------------------------------------------ */
 
 
     function showEngine(which) {
-        [CAPTURE, BUNDLE, CORRELATE, PATH].forEach(function (id) {
+        [CAPTURE, BUNDLE, CORRELATE, PATH, REPORT].forEach(function (id) {
             var node = document.getElementById(id);
             if (node) node.classList.toggle("is-active", id === which);
         });
@@ -2144,6 +2450,26 @@
         });
         rail.appendChild(pathBtn);
 
+        var repBtn = el("button", "atlas-rail-item");
+        repBtn.type = "button";
+        var repIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        repIcon.setAttribute("viewBox", "0 0 24 24");
+        repIcon.setAttribute("fill", "none");
+        repIcon.setAttribute("stroke", "currentColor");
+        repIcon.setAttribute("stroke-width", "1.6");
+        repIcon.setAttribute("stroke-linecap", "round");
+        repIcon.innerHTML = '<path d="M6 3h8l4 4v14H6z"/><path d="M9 12h6M9 16h6M9 8h3"/>';
+        repBtn.appendChild(repIcon);
+        repBtn.appendChild(el("span", null, "Report & history"));
+        repBtn.dataset.engine = REPORT;
+        repBtn.addEventListener("click", function () {
+            setSummaryMode(false);
+            showEngine(REPORT);
+            renderReportWorkspace();
+            renderHistory();
+        });
+        rail.appendChild(repBtn);
+
         rail.addEventListener("click", function (e) {
             var item = e.target.closest(".atlas-rail-item");
             if (item) markActive(item);
@@ -2185,6 +2511,8 @@
         });
         main.appendChild(buildCorrelateView());
         main.appendChild(buildPathView());
+        main.appendChild(buildReportWorkspaceView());
+        renderHistory();
         layout.appendChild(main);
         document.body.appendChild(layout);
 

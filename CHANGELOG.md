@@ -33,7 +33,39 @@ under `[Unreleased]` until one is cut.
   expanded row. The distinction matters because one of those is a permanent
   limit of the inputs and the others might be settled by a longer log.
 
+### Fixed
+
+- **Read Me, Feedback and the `?` popover did nothing from most views** - three
+  reports, one cause. Each is reached from the shared header but its panel is
+  owned by one engine, and an engine that is not the active one is
+  `display:none`. The toggles were firing correctly the whole time; the panel
+  un-hid into a hidden subtree and measured **0x0**. The three panels are now
+  moved into a shell-owned overlay at startup, which keeps their listeners
+  intact so neither engine's JavaScript changed. Verified from the Correlation
+  view, where all three were previously dead: Read Me 900x673, Feedback
+  900x576, help popover 360x262, each with a close control.
+- **The avatar read `JM`** - hardcoded initials inherited from the capture
+  engine. Now `A/J`, for Amit and Jairo, with the badge widened because three
+  characters did not fit a 26px square with no padding.
+
 ### Added
+
+- **A Report view worth reading before you send it.** The report was previously
+  a wall of text appended to the capture engine's page - everything or nothing,
+  no preview, and a Download button that produced something the reader had not
+  seen. It is now its own view: each section can be included or dropped with
+  its size shown, the full text is rendered on screen, and Copy sits beside
+  Download. The preview and the file come from the same call, so the report
+  cannot promise something the view did not show. Measured on a real session:
+  three sections (traffic capture 48 KB, endpoint bundle 377 KB, across
+  artefacts 235 KB) making a 676,428-character report; dropping one section
+  took it to 626,903.
+- **History.** Every analysis is recorded when it finishes - time, files,
+  hosts, flows, failing flows - so two runs can be compared without running one
+  of them twice. Each record can be viewed, downloaded or deleted, with a
+  delete-all. **Records live in this browser only and are never uploaded**, but
+  they carry the hostnames and addresses from the evidence, and the view says
+  so.
 
 - **A failing flow now says what to do about it**, in two visibly separate
   halves because they are worth different amounts. The **Measured** half is

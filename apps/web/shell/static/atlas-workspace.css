@@ -1153,3 +1153,95 @@ body.atlas-workspace .layout {
 }
 .atlas-guide ul { margin: 0.1rem 0 0; padding-left: 1.1rem; }
 .atlas-guide li { font-size: 0.83rem; margin: 0.15rem 0; }
+
+/* --- report & history ---------------------------------------------------- */
+.atlas-report-picker {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.6rem 0;
+}
+.atlas-report-picker-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.65;
+}
+.atlas-report-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+.atlas-report-chip:hover { border-color: #58a6ff; }
+.atlas-report-size { opacity: 0.55; font-size: 0.74rem; }
+.atlas-report-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.7rem 0 0.3rem;
+    flex-wrap: wrap;
+}
+.atlas-report-preview {
+    max-height: 60vh;
+    overflow: auto;
+    background: var(--atlas-surface, #0d1117);
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.atlas-hist-head-block { margin-top: 2rem; }
+.atlas-hist {
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 8px;
+    padding: 0.6rem 0.85rem;
+    margin: 0.5rem 0;
+    background: var(--atlas-surface, #0d1117);
+}
+.atlas-hist-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    flex-wrap: wrap;
+}
+.atlas-hist-when { font-weight: 600; font-size: 0.86rem; }
+.atlas-hist-files {
+    font-family: var(--atlas-mono, monospace);
+    font-size: 0.76rem;
+    opacity: 0.7;
+}
+.atlas-hist-stats {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin: 0.4rem 0;
+}
+.atlas-hist-chip {
+    font-size: 0.76rem;
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 999px;
+    padding: 0.05rem 0.55rem;
+    opacity: 0.85;
+}
+.atlas-hist-acts { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.atlas-hist-btn {
+    font: inherit;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--atlas-border, #30363d);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.atlas-hist-btn:hover { border-color: #58a6ff; }
+.atlas-hist .atlas-report-preview { margin-top: 0.5rem; }

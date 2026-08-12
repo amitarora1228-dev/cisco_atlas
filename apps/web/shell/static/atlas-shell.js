@@ -116,6 +116,57 @@
             });
     }
 
+    /* Panels belonging to header controls must leave the engine they came from.
+     *
+     * Read Me, Feedback and the help popover are owned by one engine but reached
+     * from the shared header, so they can be opened while a *different* engine
+     * is on screen. Their toggles were working the whole time - the class came
+     * off correctly - but the panel sits inside an engine panel that is
+     * `display:none` unless it is the active one, so it un-hid into nothing and
+     * read as a dead button. Three separate reports, one cause.
+     *
+     * Moving the node is what fixes it, and moving is also what makes it safe:
+     * a moved node keeps its listeners, so neither engine's JavaScript changes.
+     * The host is inert until something inside it is shown, so it never steals
+     * a click from the page underneath.
+     */
+    var LIFT = ["#readmePanel", "#feedbackPanel", "#help-pop"];
+
+    function liftPanels() {
+        var host = document.getElementById("atlas-overlay");
+        if (!host) {
+            host = el("div", "atlas-overlay");
+            host.id = "atlas-overlay";
+            document.body.appendChild(host);
+        }
+        LIFT.forEach(function (selector) {
+            var node = document.querySelector(selector);
+            if (!node || node.parentElement === host) return;
+            host.appendChild(node);
+            addCloser(node);
+        });
+    }
+
+    /* The header button toggles these, so clicking it again closes them - but
+     * that is not discoverable once the panel covers what the reader was
+     * looking at. The close button drives the engine's own toggle rather than
+     * hiding the panel directly, so the engine's idea of open stays true. */
+    function addCloser(panel) {
+        if (panel.id === "help-pop") return;
+        if (panel.querySelector(".atlas-overlay-close")) return;
+        var toggle = panel.id === "readmePanel"
+            ? document.getElementById("readmeToggle")
+            : document.getElementById("feedbackToggle");
+        var close = el("button", "atlas-overlay-close", "\u2715");
+        close.type = "button";
+        close.setAttribute("aria-label", "Close");
+        close.addEventListener("click", function () {
+            if (toggle) toggle.click();
+            else panel.classList.add("hidden");
+        });
+        panel.insertBefore(close, panel.firstChild);
+    }
+
     function init() {
         var active = activeModule();
         if (!active) return;
@@ -125,6 +176,7 @@
         adoptControls(header);
         reportHealth(header.querySelector(".atlas-actions"));
         document.body.classList.add("atlas-shell");
+        liftPanels();
     }
 
     if (document.readyState === "loading") {

@@ -133,6 +133,9 @@
     border-color: transparent;
     font-weight: 700;
     font-size: 0.72rem;
+    /* Three characters do not fit a 26px square with no padding. */
+    padding: 0 8px;
+    border-radius: 999px;
 }
 
 .atlas-actions .pill {
@@ -170,3 +173,60 @@ body.atlas-shell .dh-shell {
         gap: 12px;
     }
 }
+
+/* --- lifted panels ------------------------------------------------------- */
+/* Read Me, Feedback and the help popover are opened from the shared header, so
+   they cannot live inside an engine panel that may be display:none. They are
+   moved here instead. The host is inert - it only becomes clickable where a
+   panel is actually shown - so it never intercepts a click meant for the page. */
+.atlas-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    pointer-events: none;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 72px 16px 24px;
+    overflow: hidden;
+}
+.atlas-overlay > *:not(.hidden) {
+    pointer-events: auto;
+    max-width: 900px;
+    width: 100%;
+    max-height: calc(100vh - 96px);
+    overflow: auto;
+    position: relative;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+/* The help popover positions itself against the viewport already. */
+.atlas-overlay > #help-pop {
+    max-width: 360px;
+    width: auto;
+    margin-left: auto;
+}
+/* Dim the page behind, but only while something is open. */
+.atlas-overlay:has(> *:not(.hidden):not(#help-pop))::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.6);
+    pointer-events: auto;
+}
+.atlas-overlay-close {
+    position: sticky;
+    float: right;
+    top: 0;
+    margin: -0.35rem -0.35rem 0 0.5rem;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--atlas-border, #30363d);
+    background: var(--atlas-surface, #0d1117);
+    color: inherit;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+}
+.atlas-overlay-close:hover { border-color: #58a6ff; }

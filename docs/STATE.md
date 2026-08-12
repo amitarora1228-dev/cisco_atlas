@@ -273,7 +273,6 @@ problem for — **not** one known to have worked. That sentence is emitted as a
 note on every run, and a test asserts it.
 
 ### The one place output is not evidence
-
 `_REASON_GUIDANCE` in `flows.py` holds likely causes and next steps per close
 reason. It is **general knowledge about the token, not derived from any
 artefact**, and the UI labels it *"general guidance, not a finding from your
@@ -433,6 +432,14 @@ Two things to know before touching this:
 
 Every one of these was a real failure here, not a hypothetical.
 
+- **A global control's panel must not live inside an engine.** Read Me, Feedback
+  and the `?` popover are reached from the shared header but were owned by one
+  engine, so opening them from any other view un-hid a panel inside a
+  `display:none` subtree: **0x0**, and three separate reports of "the button
+  does nothing" when the button was working perfectly. Anything reachable from
+  the header now gets lifted into `#atlas-overlay` at startup. Move the node,
+  never clone it - a move keeps the listeners, which is what lets the engines
+  stay untouched.
 - **Restart after Python changes.** uvicorn does not run with `--reload`.
 - **Jinja caches templates.** Editing a `.html` in the bundle engine does nothing
   until the server restarts. A change can silently *appear* to have no effect.

@@ -172,6 +172,22 @@ the hit rate is entirely a matter of how the evidence was collected.
 
 ---
 
+## 12. The history store's quota fallback is unexercised
+
+**Evidence.** One report of a real session measured **676,428 characters**, and
+`localStorage` is nominally about 5 MB, so a full history of 25 runs cannot fit.
+`historySave` therefore drops the oldest records one at a time, then falls back
+to storing metadata without report text. That logic has **never run**: an
+attempt to induce a quota error in the harness failed because that Chromium
+profile accepted 6 MB of filler plus the records without complaint. So the
+ordinary path is verified and the degradation path is not.
+
+**Also unresolved:** history is a new retention decision for a tool whose whole
+discipline is that evidence is never kept. It is in the browser rather than on
+disk or in git, it is deletable from the view, and the view states what it
+contains - but nothing expires it automatically, and a shared machine keeps it
+until someone presses the button.
+
 ## 10. The path stitcher has never met a real device
 
 **Evidence.** `tests/test_path_stitch.py` builds its own captures. That is the

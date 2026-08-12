@@ -150,6 +150,42 @@ def test_unrelated_captures_are_not_stitched_together(tmp_path):
     )
 
 
+def test_focusing_on_the_far_end_keeps_the_whole_chain(tmp_path):
+    """Searching for the resource must not delete the legs that reach it.
+
+    This is the mistake the filter exists to avoid. The client's leg is
+    addressed to the proxy, so it does not mention the resource at all - filter
+    the legs and the chain starts halfway along, which is worse than no filter
+    because it looks like a complete answer.
+    """
+    base = 1_700_000_000.0
+    inbound = _write_pcap(tmp_path / "in.pcap", [
+        (base, _tcp_packet("10.1.1.10", "10.2.2.2", 50000, 443, 111_000, SYN)),
+    ])
+    outbound = _write_pcap(tmp_path / "out.pcap", [
+        (base + 0.5, _tcp_packet("10.2.2.2", "10.9.9.9", 40000, 443, 999_000, SYN)),
+    ])
+    vantages = [Vantage("client", _flows(inbound)), Vantage("egress", _flows(outbound))]
+
+    # 10.9.9.9 is the resource, named only by the *last* leg.
+    focused = stitch_path(vantages, focus="10.9.9.9")
+
+    assert focused, "the transaction reaches 10.9.9.9, so it must be found by that address"
+    chain = focused[0].segments
+    assert len(chain) == 2, "both legs must survive - the first one never mentions the resource"
+    assert chain[0].first.src_ip == "10.1.1.10", "the chain must still start at the client"
+
+
+def test_a_focus_that_matches_nothing_returns_nothing(tmp_path):
+    """An empty result is the honest answer to a term that is not there."""
+    base = 1_700_000_000.0
+    one = _write_pcap(tmp_path / "one.pcap", [
+        (base, _tcp_packet("10.1.1.10", "10.2.2.2", 50000, 443, 111_000, SYN)),
+    ])
+
+    assert stitch_path([Vantage("one", _flows(one))], focus="192.0.2.77") == []
+
+
 def test_a_leg_without_a_handshake_says_why_it_cannot_join(tmp_path):
     """No SYN means no sequence number, which means no join - and a note."""
     base = 1_700_000_000.0

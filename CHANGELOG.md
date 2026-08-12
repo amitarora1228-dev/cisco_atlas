@@ -81,6 +81,20 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **The path view can be narrowed to one transaction** by address, port or
+  hostname - one box, searched against every field, because an operator arrives
+  knowing the resource as a hostname, or as the address the firewall logged, or
+  as a port, and should not have to know which before they can search. The
+  filter is applied to **finished chains, never to legs**: the obvious
+  implementation would have destroyed the thing being asked for, since the
+  client's first leg is addressed to the *proxy* and does not mention the
+  resource at all, so filtering legs would leave the chain starting halfway
+  along while still looking complete. Verified: focusing on `10.50.0.9`, named
+  only by the last leg, returns both legs and still starts at the client;
+  focusing by the client address or by source port works the same way; a term
+  that matches nothing returns nothing and says how many it dropped. Two tests
+  cover it, including the halfway-chain mistake.
+
 - **Per-flow connection quality: round-trip time, jitter, retransmissions,
   duplicate ACKs, out-of-order and zero windows** - shown for the flow's own
   connection *and* for the tunnel carrying it, because in an intercepted

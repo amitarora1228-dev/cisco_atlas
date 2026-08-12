@@ -338,10 +338,41 @@ def _order_segments(segments: list[Segment], links: list[Link]) -> list[Segment]
     return ordered
 
 
-def stitch_path(vantages: list[Vantage], destination: str | None = None) -> list[PathTrace]:
+def _segment_matches(segment: Segment, needle: str) -> bool:
+    """Does this leg mention what the reader is looking for?
+
+    Addresses, ports and the TLS name are all searched together, because an
+    operator arrives with one identifier and does not know or care which field
+    it will turn out to be - a resource is a hostname to the person who
+    reported it, an address to the firewall and a port to the proxy.
+    """
+    first = segment.first
+    haystack = " ".join(
+        part
+        for part in (
+            first.src_ip,
+            first.dst_ip,
+            str(first.src_port),
+            str(first.dst_port),
+            segment.sni or "",
+        )
+        if part
+    ).lower()
+    return needle.lower() in haystack
+
+
+def stitch_path(vantages: list[Vantage], focus: str | None = None) -> list[PathTrace]:
     """Follow each transaction across every capture supplied.
 
-    Returns one trace per destination, longest chain first, because the reader
+    ``focus`` narrows the result to the transactions that mention an address,
+    port or hostname - and it is applied to *finished chains*, never to legs.
+    Filtering legs would be the obvious implementation and would destroy the
+    thing being asked for: the client's first leg is addressed to the proxy, so
+    a search for the private resource does not match it, and dropping it would
+    leave the chain starting halfway along. A trace is kept whole if any one of
+    its legs matches.
+
+    Returns one trace per transaction, longest chain first, because the reader
     is looking for the flow that crossed the most of the path - that is the one
     with something to say about where it broke.
     """
@@ -396,13 +427,6 @@ def stitch_path(vantages: list[Vantage], destination: str | None = None) -> list
             best[link.upstream] = link
     links = list(best.values())
 
-    by_destination: dict[str, list[Segment]] = defaultdict(list)
-    for segment in segments:
-        name = segment.sni or segment.server
-        if destination and destination not in (segment.sni or "") and destination != segment.server:
-            continue
-        by_destination[name].append(segment)
-
     # One chain per connected component, not one per destination. A chain
     # crosses several destinations by its nature - the first leg is addressed
     # to the proxy, not to the resource - so grouping by destination reported
@@ -419,7 +443,7 @@ def stitch_path(vantages: list[Vantage], destination: str | None = None) -> list
         if link.upstream in parent and link.downstream in parent:
             parent[_root(link.upstream)] = _root(link.downstream)
 
-    wanted = {s.key for group in by_destination.values() for s in group}
+    wanted = {s.key for s in segments}
     components: dict[str, list[Segment]] = defaultdict(list)
     for segment in segments:
         if segment.key in wanted:
@@ -455,6 +479,15 @@ def stitch_path(vantages: list[Vantage], destination: str | None = None) -> list
         )
 
     traces.sort(key=lambda t: (-len(t.segments), -t.proved_hops, t.destination))
+
+    if focus:
+        needle = focus.strip()
+        if needle:
+            traces = [
+                trace
+                for trace in traces
+                if any(_segment_matches(segment, needle) for segment in trace.segments)
+            ]
     return traces
 
 

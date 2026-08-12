@@ -30,7 +30,7 @@ from a2wsgi import WSGIMiddleware  # noqa: E402
 from capture_inspector.pcap import find_tshark  # noqa: E402
 from capture_inspector.server import app as capture_app  # noqa: E402
 from darthawk import app as darthawk_wsgi_app  # noqa: E402
-from fastapi import FastAPI, File, UploadFile  # noqa: E402
+from fastapi import FastAPI, File, Form, UploadFile  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from web.shell.workspace import compose  # noqa: E402
@@ -303,7 +303,10 @@ async def correlate_session_upload(
 
 
 @app.post("/atlas/api/path", include_in_schema=False)
-async def stitch_path_upload(files: list[UploadFile] = File(...)) -> JSONResponse:
+async def stitch_path_upload(
+    files: list[UploadFile] = File(...),
+    focus: str = Form(""),
+) -> JSONResponse:
     """Follow one transaction across captures taken at several points of the path.
 
     Each file is a vantage point. The order of the hops is not asked for and
@@ -345,7 +348,17 @@ async def stitch_path_upload(files: list[UploadFile] = File(...)) -> JSONRespons
                 "capture only that one vantage point is reported."
             )
 
-        payload = as_payload(stitch_path(vantages), vantages)
+        traces = stitch_path(vantages, focus=focus)
+        if focus.strip():
+            total = len(stitch_path(vantages))
+            notes.append(
+                f"Showing {len(traces)} of {total} transaction(s), narrowed to those mentioning "
+                f"'{focus.strip()}'. A transaction is kept whole when any one of its legs "
+                f"matches, because the client's first leg is addressed to the proxy rather than "
+                f"to the resource and would not match a search for it."
+            )
+
+        payload = as_payload(traces, vantages)
         payload["notes"] = notes
         return JSONResponse(payload)
     finally:

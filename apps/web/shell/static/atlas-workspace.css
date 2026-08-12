@@ -1340,3 +1340,16 @@ html.theme-darker pre {
     outline: 2px dashed #58a6ff;
     outline-offset: -6px;
 }
+
+.atlas-path-focus {
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.25rem 0.6rem;
+    min-width: 26rem;
+    max-width: 100%;
+    border-radius: 6px;
+    border: 1px solid var(--atlas-border, #30363d);
+    background: var(--atlas-bg, #14181d);
+    color: inherit;
+}
+.atlas-path-focus:focus { outline: 1px solid #58a6ff; }

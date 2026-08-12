@@ -2064,6 +2064,8 @@
         }
         var form = new FormData();
         files.forEach(function (file) { form.append("files", file); });
+        var focus = document.getElementById("atlas-path-focus");
+        form.append("focus", focus ? focus.value : "");
 
         button.disabled = true;
         status.textContent = "Stitching " + files.length + " capture(s)...";
@@ -2141,6 +2143,28 @@
         var staged = el("div", null);
         staged.id = "atlas-path-files";
         view.appendChild(staged);
+
+        /* One identifier, whichever field it turns out to live in. An operator
+         * arrives knowing the resource as a hostname, or as the address the
+         * firewall logged, or as a port - and should not have to know which
+         * before they can search. */
+        var focusRow = el("div", "atlas-corr-bar");
+        var focusLabel = el("label", "atlas-report-picker-label", "Narrow to");
+        focusLabel.setAttribute("for", "atlas-path-focus");
+        var focus = el("input", "atlas-path-focus");
+        focus.id = "atlas-path-focus";
+        focus.type = "search";
+        focus.placeholder = "address, port or hostname - e.g. 10.50.0.9, 443, app.corp.example";
+        focus.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") button.click();
+        });
+        focusRow.appendChild(focusLabel);
+        focusRow.appendChild(focus);
+        view.appendChild(focusRow);
+        view.appendChild(el("p", "atlas-corr-blurb",
+            "Leave this empty to see every transaction. A transaction is kept whole when any "
+                + "one of its legs matches, because the client's first leg is addressed to the "
+                + "proxy rather than to the resource and would not match a search for it."));
 
         // Dropping several captures at once is the fastest way to stage them,
         // and the same accumulate-rather-than-replace rule applies.

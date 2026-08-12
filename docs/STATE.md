@@ -509,6 +509,13 @@ Every one of these was a real failure here, not a hypothetical.
   correlation over three artefacts looks invented. Labels are synced from the
   inputs at startup and each tile has a Remove control. Anything reasoning
   about what is loaded must read `input.files`, never the label.
+- **`innerText` omits collapsed `<details>`, and its fallback hides the fact.**
+  It returns what is rendered, so text inside a closed `<details>` is missing -
+  which made an export from the bundle page 1,695 characters instead of 387,331.
+  Worse, the same call on an element inside a `display:none` subtree falls back
+  to `textContent` and returns everything, so a measurement taken while the
+  block was hidden looked correct and hid the bug. Use `readableText`, which
+  opens collapsed sections, reads, and restores them.
 - **PowerShell breaks on quotes in commit messages.** Use `git commit -F <file>`.
 - **`.Length` on `curl.exe` output counts lines, not bytes.**
 - **Never commit evidence.** Captures, HARs, key logs and DART bundles are all

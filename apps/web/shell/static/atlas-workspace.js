@@ -577,17 +577,45 @@
      */
     var lastCorrelation = null;
 
+    /* Read every word of a rendered block, including the collapsed parts.
+     *
+     * `innerText` returns what is *rendered*, so text inside a closed
+     * `<details>` is omitted. The bundle output is almost entirely inside one -
+     * "All checks and full output" - so exporting from the bundle page produced
+     * 1,695 characters where the same run exported 387,719 from elsewhere. The
+     * earlier measurement was itself misleading: the block was in a hidden
+     * subtree at the time, where `innerText` falls back to `textContent` and
+     * quietly returns everything.
+     *
+     * `textContent` would fix the omission but run every block together with no
+     * line breaks. So the sections are opened, read, and put back exactly as
+     * they were.
+     */
+    function readableText(node) {
+        if (!node) return "";
+        var closed = Array.prototype.filter.call(
+            node.querySelectorAll("details"),
+            function (details) { return !details.open; }
+        );
+        closed.forEach(function (details) { details.open = true; });
+        var text = node.innerText || node.textContent || "";
+        closed.forEach(function (details) { details.open = false; });
+        return text.trim();
+    }
+
     function reportSections() {
         var sections = [];
 
+        // A <pre> is already preformatted, so its textContent is exactly the
+        // report - and it sits inside a collapsed <details> of its own.
         var raw = document.querySelector("#" + CAPTURE + " #report .rp-raw pre");
         if (raw && raw.textContent.trim()) {
             sections.push(["Traffic capture", raw.textContent.trim()]);
         }
 
-        var bundle = document.getElementById("atlas-bundle-results");
-        if (bundle && bundle.innerText.trim()) {
-            sections.push(["Endpoint bundle", bundle.innerText.trim()]);
+        var bundle = readableText(document.getElementById("atlas-bundle-results"));
+        if (bundle) {
+            sections.push(["Endpoint bundle", bundle]);
         }
 
         if (lastCorrelation) {

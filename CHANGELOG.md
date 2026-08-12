@@ -72,6 +72,16 @@ under `[Unreleased]` until one is cut.
 
 ### Fixed
 
+- **Exporting from the Bundle analysis page produced an almost empty report.**
+  `innerText` returns only what is *rendered*, and the bundle output sits almost
+  entirely inside a collapsed `<details>` ("All checks and full output"), so the
+  export was 1,695 characters. The 387,719 measured earlier was itself
+  misleading: that read happened while the block was in a hidden subtree, where
+  `innerText` falls back to `textContent` and quietly returns everything. The
+  reader now opens collapsed sections, reads them, and restores them exactly as
+  they were. Verified from the Bundle analysis page: 1,695 to 387,331
+  characters, containing the evidence header, the bundle section and the
+  individual checks, with all nine `<details>` still closed afterwards.
 - **A new run showed the previous run's results.** Nothing was cleared when
   Analyze started, so analysing a bundle after a capture left the capture's
   findings, its correlation and its notice on screen - output describing

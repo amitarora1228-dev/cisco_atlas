@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import statistics
 import subprocess
 from collections import defaultdict, deque
 from collections.abc import Iterable
@@ -151,6 +152,20 @@ class WireFlow:
     assuming which one a device does."""
     peer_isn: int | None = None
     """The server's initial sequence number, from the SYN/ACK."""
+    rtts: tuple[float, ...] = ()
+    """Round trips measured from ACKs arriving from the peer, in seconds.
+
+    Only the peer's ACKs are counted. An ACK this machine sends measures how
+    quickly its own stack replied to data that had already arrived - real, but
+    microseconds, and with no network in it."""
+    retransmissions: int = 0
+    duplicate_acks: int = 0
+    zero_windows: int = 0
+    out_of_order: int = 0
+    handshake_rtt: float | None = None
+    """SYN to SYN/ACK, in seconds. The cleanest RTT there is, because it is one
+    round trip with nothing else in flight - but only available when the
+    handshake was captured."""
     head: tuple[tuple[float, str, int, str, int], ...] = ()
     tail: tuple[tuple[float, str, int, str, int], ...] = ()
     """The opening and closing packets of the connection, as
@@ -373,6 +388,12 @@ _TSHARK_FIELDS = (
     "tcp.flags.reset",
     "tcp.len",
     "tcp.seq_raw",
+    "tcp.analysis.ack_rtt",
+    "tcp.analysis.retransmission",
+    "tcp.analysis.fast_retransmission",
+    "tcp.analysis.duplicate_ack",
+    "tcp.analysis.zero_window",
+    "tcp.analysis.out_of_order",
 )
 
 # How many packets of a connection are kept for its ladder, from each end. A
@@ -428,6 +449,12 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             rst,
             payload,
             seq_raw,
+            ack_rtt,
+            retrans,
+            fast_retrans,
+            dup_ack,
+            zero_window,
+            out_of_order,
         ) = parts[: len(_TSHARK_FIELDS)]
         if not stream or not sport or not dport:
             continue
@@ -475,6 +502,13 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
                 "anchored": False,
                 "isn": None,
                 "peer_isn": None,
+                "rtts": [],
+                "retrans": 0,
+                "dup_ack": 0,
+                "zero_window": 0,
+                "out_of_order": 0,
+                "syn_at": None,
+                "synack_at": None,
                 "head": [],
                 "tail": deque(maxlen=_PACKET_EDGE),
             }
@@ -499,6 +533,30 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             )
         rec["packets"] += 1
         rec["bytes"] += size
+        if ack_rtt:
+            try:
+                # Keep who sent it. Wireshark attaches ack_rtt to every ACK,
+                # including the ones this machine sends to acknowledge the
+                # peer's data - those measure how fast the local stack replied,
+                # which is microseconds and has no network in it. Only an ACK
+                # arriving *from* the peer measures a round trip, and mixing
+                # the two produced a median of 0.333 ms for a tunnel to a
+                # headend across the internet.
+                rec["rtts"].append((src, int(sport), float(ack_rtt)))
+            except ValueError:
+                pass
+        if retrans or fast_retrans:
+            rec["retrans"] += 1
+        if dup_ack:
+            rec["dup_ack"] += 1
+        if zero_window:
+            rec["zero_window"] += 1
+        if out_of_order:
+            rec["out_of_order"] += 1
+        if kind == "syn" and rec["syn_at"] is None:
+            rec["syn_at"] = moment
+        elif kind == "synack" and rec["synack_at"] is None:
+            rec["synack_at"] = moment
         if kind == "syn" and rec["isn"] is None and seq_raw:
             try:
                 rec["isn"] = int(seq_raw)
@@ -537,6 +595,20 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             has_syn=rec["anchored"],
             isn=rec["isn"],
             peer_isn=rec["peer_isn"],
+            rtts=tuple(
+                value
+                for who, port, value in rec["rtts"]
+                if not (who == rec["src_ip"] and port == rec["src_port"])
+            ),
+            retransmissions=rec["retrans"],
+            duplicate_acks=rec["dup_ack"],
+            zero_windows=rec["zero_window"],
+            out_of_order=rec["out_of_order"],
+            handshake_rtt=(
+                rec["synack_at"] - rec["syn_at"]
+                if rec["syn_at"] is not None and rec["synack_at"] is not None
+                else None
+            ),
             head=tuple(rec["head"]),
             tail=tuple(rec["tail"]),
         )
@@ -944,6 +1016,9 @@ def as_payload(session: SessionCorrelation) -> dict:
 
     unknown = [h for h in session.hosts if h.steering is Steering.UNKNOWN]
     clusters = _reason_clusters(session.flows)
+    # A flow names its tunnel as the agent recorded it; the tunnel's own
+    # connection - the one with a network in it - is on the correlated tunnel.
+    tunnel_wires = {id(t.agent): t.wire for t in session.tunnels}
     return {
         "summary": {
             "hosts": len(session.hosts),
@@ -964,7 +1039,7 @@ def as_payload(session: SessionCorrelation) -> dict:
         },
         "hosts": sorted(hosts, key=lambda h: (-h["requests"], h["host"])),
         "tunnels": tunnels,
-        "flows": [_flow_payload(flow, clusters) for flow in session.flows],
+        "flows": [_flow_payload(flow, clusters, tunnel_wires) for flow in session.flows],
         "notes": session.notes,
         "sources": session.sources,
     }
@@ -973,6 +1048,10 @@ def as_payload(session: SessionCorrelation) -> dict:
 # What the agent's own close-reason token means. These describe the token, they
 # do not diagnose the cause - the agent says what it did, not why the far end
 # behaved as it did, and the difference matters when a reader acts on it.
+# Below this many paired round trips, variation between them is noise rather
+# than jitter, and reporting it would dress up nothing as a measurement.
+_MIN_JITTER_SAMPLES = 5
+
 _REASON_MEANING = {
     "connect_timeout": "the onward connection was not established before the agent gave up",
     "socket_read": "reading from the local application socket failed",
@@ -1108,7 +1187,95 @@ def _reason_clusters(flows: list[FlowCorrelation]) -> dict[int, dict]:
     return clusters
 
 
-def _flow_payload(flow: FlowCorrelation, clusters: dict[int, dict] | None = None) -> dict:
+def _flow_quality(wire: WireFlow | None) -> dict | None:
+    """RTT, jitter and loss signals for one connection - with their limits.
+
+    Three refusals are built in, because each of them is a way this could
+    mislead a reader who has every reason to trust it:
+
+    * **A loopback leg is not the network.** Half the connections in an
+      intercepted session run from the application to the agent's own listener
+      on 127.0.0.1. Their RTT is a memory copy, sub-millisecond by
+      construction, and reporting it as latency would make every session look
+      excellent no matter how bad the path beyond the agent was. The tunnel
+      carrying the flow is where the network actually is.
+    * **Retransmissions are not a loss percentage.** One capture point cannot
+      tell a packet lost before it from one lost after it, and a capture taken
+      on the sending host sees its own retransmissions but not the drop. The
+      count is reported as what it is - retransmissions observed - and never
+      converted into a rate that would read as measured loss.
+    * **Jitter needs samples.** Variation computed from two round trips is
+      noise with a decimal point, so it is withheld below a handful.
+    """
+    if wire is None:
+        return None
+
+    samples = sorted(wire.rtts)
+    quality: dict = {
+        "loopback": wire.is_loopback,
+        "packets": wire.packets,
+        "retransmissions": wire.retransmissions,
+        "duplicate_acks": wire.duplicate_acks,
+        "zero_windows": wire.zero_windows,
+        "out_of_order": wire.out_of_order,
+        "rtt_samples": len(samples),
+        "handshake_rtt_ms": round(wire.handshake_rtt * 1000, 3)
+        if wire.handshake_rtt is not None
+        else None,
+        "rtt_min_ms": round(samples[0] * 1000, 3) if samples else None,
+        "rtt_median_ms": round(statistics.median(samples) * 1000, 3) if samples else None,
+        "rtt_max_ms": round(samples[-1] * 1000, 3) if samples else None,
+        "jitter_ms": None,
+        "notes": [],
+    }
+
+    # Jitter as mean deviation between consecutive round trips - the same idea
+    # RFC 3550 uses for RTP, which is what an operator means by the word.
+    if len(wire.rtts) >= _MIN_JITTER_SAMPLES:
+        deltas = [
+            abs(wire.rtts[i] - wire.rtts[i - 1]) for i in range(1, len(wire.rtts))
+        ]
+        quality["jitter_ms"] = round(statistics.fmean(deltas) * 1000, 3)
+    elif samples:
+        quality["notes"].append(
+            f"Jitter needs several round trips to mean anything and this connection produced "
+            f"{len(samples)}; it is not reported rather than computed from too little."
+        )
+
+    if wire.is_loopback:
+        quality["notes"].append(
+            "This leg runs to the agent's own listener on this machine, so its round-trip time "
+            "is a memory copy and not a measure of the network. The tunnel carrying this flow "
+            "is where the path can be measured."
+        )
+    if not wire.has_syn:
+        quality["notes"].append(
+            "The handshake was not captured, so the cleanest round-trip measurement - SYN to "
+            "SYN/ACK, with nothing else in flight - is not available. The ACK figures are a "
+            "distribution rather than the path's latency: they pair each ACK with the segment "
+            "it acknowledged, which under-reads whenever the sender had already put several "
+            "segments in flight."
+        )
+    if wire.retransmissions:
+        quality["notes"].append(
+            f"{wire.retransmissions} retransmission(s) were observed. This is not a loss "
+            "percentage: one capture point cannot tell a packet lost before it from one lost "
+            "after it, so the count is evidence of retransmission, not a measured loss rate."
+        )
+    if wire.zero_windows:
+        quality["notes"].append(
+            f"{wire.zero_windows} zero-window advertisement(s): a receiver told the sender to "
+            "stop because its buffer was full. That is the receiving application not reading, "
+            "which is a different problem from a slow network."
+        )
+    return quality
+
+
+def _flow_payload(
+    flow: FlowCorrelation,
+    clusters: dict[int, dict] | None = None,
+    tunnel_wires: dict[int, WireFlow] | None = None,
+) -> dict:
     """One intercepted flow, with every claim carrying the artefact behind it."""
     app = flow.app
     statuses: dict[str, int] = {}
@@ -1174,6 +1341,10 @@ def _flow_payload(flow: FlowCorrelation, clusters: dict[int, dict] | None = None
         "explanation": _explain_flow(flow),
         "evidence": evidence,
         "timeline": _flow_timeline(flow),
+        "quality": _flow_quality(flow.wire),
+        "tunnel_quality": _flow_quality(
+            (tunnel_wires or {}).get(id(flow.tunnel)) if flow.tunnel is not None else None
+        ),
         "guidance": [
             {
                 "reason": reason,

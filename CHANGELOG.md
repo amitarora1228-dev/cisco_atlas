@@ -35,6 +35,16 @@ under `[Unreleased]` until one is cut.
 
 ### Fixed
 
+- **Nothing preformatted was readable in the darker theme.** The bundle engine
+  ships `input, textarea, select, pre { background: #fff !important; color:
+  var(--text-main) !important }` - a hardcoded white background paired with a
+  text colour that flips with the theme. In the darker theme `--text-main` is
+  `#e6eaef`, so all **19 `<pre>` elements on the page measured a contrast ratio
+  of 1.22** - the capture engine's report, the bundle output and the key-log
+  help as well as the new report preview. Repaired with a darker-theme-scoped
+  override that takes both colours from the same palette. Measured after:
+  minimum contrast **6.36** across 25 elements in both themes, none below the
+  4.5 accessibility floor.
 - **Read Me, Feedback and the `?` popover did nothing from most views** - three
   reports, one cause. Each is reached from the shared header but its panel is
   owned by one engine, and an engine that is not the active one is
@@ -49,6 +59,27 @@ under `[Unreleased]` until one is cut.
   characters did not fit a 26px square with no padding.
 
 ### Added
+
+- **Per-flow connection quality: round-trip time, jitter, retransmissions,
+  duplicate ACKs, out-of-order and zero windows** - shown for the flow's own
+  connection *and* for the tunnel carrying it, because in an intercepted
+  session those are very different things. Three refusals are built in, each
+  guarding against a number that would be believed:
+  - **A local leg is not the network.** Measured on a real session, **62 of 62**
+    flows with quality data ran to the agent's listener on 127.0.0.1. Their RTT
+    is a memory copy - 0.02 ms - and reported as latency it would have made the
+    session look flawless no matter how bad the path beyond the agent was.
+    Those legs are flagged and their RTT is stated to be meaningless.
+  - **Only the peer's ACKs measure a round trip.** Wireshark attaches `ack_rtt`
+    to every ACK including the ones this machine sends, which are local and
+    near-zero. Counting both gave a tunnel to a headend across the internet a
+    median RTT of **0.333 ms**. Filtering to ACKs arriving from the peer took
+    the sample count from 702 to 305 and the median to 0.766 ms, with a maximum
+    of 73.7 ms - and even that is labelled a distribution rather than the
+    path's latency, because ACK pairing under-reads whenever the sender bursts.
+    The handshake RTT is named as the only clean measurement.
+  - **Retransmissions are never converted into a loss percentage.** One capture
+    point cannot tell a packet lost before it from one lost after it.
 
 - **A Report view worth reading before you send it.** The report was previously
   a wall of text appended to the capture engine's page - everything or nothing,

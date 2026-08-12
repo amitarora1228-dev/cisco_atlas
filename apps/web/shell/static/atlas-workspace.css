@@ -1245,3 +1245,65 @@ body.atlas-workspace .layout {
 }
 .atlas-hist-btn:hover { border-color: #58a6ff; }
 .atlas-hist .atlas-report-preview { margin-top: 0.5rem; }
+
+/* --- connection quality -------------------------------------------------- */
+.atlas-quality { grid-column: 1 / -1; }
+.atlas-q-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.9rem;
+}
+.atlas-q h5 {
+    margin: 0 0 0.4rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.75;
+}
+.atlas-q-tag {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.72rem;
+    border: 1px solid #d29922;
+    color: #d29922;
+    border-radius: 999px;
+    padding: 0.02rem 0.45rem;
+    margin-left: 0.35rem;
+    opacity: 0.9;
+}
+.atlas-q-note {
+    font-size: 0.78rem;
+    opacity: 0.75;
+    margin: 0.35rem 0 0;
+    border-left: 2px solid var(--atlas-border, #30363d);
+    padding-left: 0.55rem;
+}
+
+/* --- darker theme: preformatted text and form fields --------------------- */
+/* The bundle engine ships:
+ *
+ *     input, textarea, select, pre {
+ *         background: #fff !important;
+ *         color: var(--text-main) !important;
+ *     }
+ *
+ * A hardcoded white background paired with a text colour that flips with the
+ * theme. In the darker theme --text-main is #e6eaef, so every one of these
+ * renders near-white on white: measured contrast 1.22 across all 19 <pre>
+ * elements on the page - the capture engine's report, the bundle output and
+ * the key-log help as well as the report preview. It was reported simply as
+ * "I can't read this".
+ *
+ * The engine's rule is !important, so this has to be too; it is scoped to the
+ * darker theme so the light theme, which was already correct, is untouched.
+ * The pairing is what matters: background and foreground must come from the
+ * same palette or they will drift apart again on the next theme.
+ */
+html.theme-darker input,
+html.theme-darker textarea,
+html.theme-darker select,
+html.theme-darker pre {
+    background: var(--atlas-surface, #1c2127) !important;
+    color: var(--atlas-text, #e6eaef) !important;
+    border-color: var(--atlas-border, #2e353d) !important;
+}

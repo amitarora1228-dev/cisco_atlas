@@ -1532,6 +1532,8 @@
 
         html += flowLadder(flow);
 
+        html += flowQuality(flow);
+
         html += flowGuidance(flow);
 
         html += "<div class=\"atlas-flow-basis\">";
@@ -1638,7 +1640,13 @@
         "sni": "Server Name Indication - the hostname the client sends in the clear during the "
             + "TLS handshake, which is how a capture can name an encrypted destination.",
         "har": "An HTTP Archive exported from the browser's developer tools. It holds URLs, "
-            + "status codes and timings that a packet capture cannot see inside TLS."
+            + "status codes and timings that a packet capture cannot see inside TLS.",
+        "quality": "Handshake RTT - SYN to SYN/ACK, one round trip with nothing else in "
+            + "flight - is the only clean measurement here. The ACK figures are a distribution "
+            + "of every round trip the peer's ACKs could be paired with, and they under-read "
+            + "when the sender bursts, so read them as a spread rather than as the path's "
+            + "latency. Retransmissions are counted, never turned into a loss percentage: one "
+            + "capture point cannot tell a packet lost before it from one lost after it."
     };
 
     function info(key) {
@@ -1646,6 +1654,69 @@
         if (!text) return "";
         return "<span class=\"atlas-info\" tabindex=\"0\" role=\"note\" aria-label=\""
             + esc(text) + "\" title=\"" + esc(text) + "\">i</span>";
+    }
+
+    /* Round-trip time, jitter and loss signals - for the leg they actually
+     * describe.
+     *
+     * The trap this exists to avoid: in an intercepted session the flow's own
+     * connection usually runs to the agent's listener on 127.0.0.1, so its RTT
+     * is a memory copy. Reporting that as latency would make every session
+     * look excellent regardless of the path beyond the agent. Where the flow
+     * was carried on a tunnel, the tunnel's own connection is shown alongside,
+     * and that is the one with a network in it.
+     */
+    function qualityGrid(title, q) {
+        if (!q) return "";
+        var cells = [
+            ["Handshake RTT (cleanest)",
+                q.handshake_rtt_ms === null ? null : q.handshake_rtt_ms + " ms"],
+            ["ACK round-trip min", q.rtt_min_ms === null ? null : q.rtt_min_ms + " ms"],
+            ["ACK round-trip median", q.rtt_median_ms === null ? null : q.rtt_median_ms + " ms"],
+            ["ACK round-trip max", q.rtt_max_ms === null ? null : q.rtt_max_ms + " ms"],
+            ["Jitter", q.jitter_ms === null ? null : q.jitter_ms + " ms"],
+            ["Round trips seen", q.rtt_samples || null],
+            ["Retransmissions", q.retransmissions || null],
+            ["Duplicate ACKs", q.duplicate_acks || null],
+            ["Out of order", q.out_of_order || null],
+            ["Zero windows", q.zero_windows || null]
+        ];
+        var body = "";
+        cells.forEach(function (pair) {
+            if (pair[1] === null || pair[1] === undefined) return;
+            body += kv(pair[0], pair[1]);
+        });
+        if (!body) {
+            body = "<p class=\"atlas-corr-blurb\">Nothing measurable: the capture holds too "
+                + "little of this connection.</p>";
+        }
+        var head = esc(title) + (q.loopback
+            ? " <span class=\"atlas-q-tag\">local leg - not the network</span>" : "");
+        return "<div class=\"atlas-q\"><h5>" + head + "</h5>" + body
+            + (q.notes || []).map(function (n) {
+                return "<p class=\"atlas-q-note\">" + esc(n) + "</p>";
+            }).join("") + "</div>";
+    }
+
+    function flowQuality(flow) {
+        if (!flow.quality && !flow.tunnel_quality) return "";
+        var html = "<div class=\"detail-block atlas-quality\"><h4>Connection quality"
+            + info("quality") + "</h4><div class=\"atlas-q-row\">";
+        html += qualityGrid("This flow", flow.quality);
+        if (flow.tunnel_quality) {
+            html += qualityGrid("Tunnel carrying it", flow.tunnel_quality);
+        } else if (flow.tunnel) {
+            /* Saying nothing here reads as a bug. The tunnel is named, so the
+             * reader reasonably expects a second panel; the honest answer is
+             * that the capture does not hold that connection. */
+            html += "<div class=\"atlas-q\"><h5>Tunnel carrying it</h5>"
+                + "<p class=\"atlas-q-note\">The agent names this flow's tunnel as "
+                + esc(flow.tunnel) + ", but the capture does not hold that connection - so the "
+                + "path beyond this machine cannot be measured for this flow. A capture running "
+                + "at the same time as the tunnel is what makes that possible.</p></div>";
+        }
+        html += "</div></div>";
+        return html;
     }
 
     function flowLadder(flow) {

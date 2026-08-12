@@ -1307,3 +1307,36 @@ html.theme-darker pre {
     color: var(--atlas-text, #e6eaef) !important;
     border-color: var(--atlas-border, #2e353d) !important;
 }
+
+/* --- staged path captures ------------------------------------------------ */
+.atlas-path-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.35rem 0 0.6rem;
+}
+.atlas-path-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 999px;
+    padding: 0.15rem 0.35rem 0.15rem 0.7rem;
+    font-size: 0.8rem;
+}
+.atlas-path-file-name { font-family: var(--atlas-mono, monospace); }
+.atlas-path-file-x {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.75rem;
+    opacity: 0.6;
+    padding: 0 0.2rem;
+    line-height: 1;
+}
+.atlas-path-file-x:hover { opacity: 1; color: #f85149; }
+#atlas-engine-path.is-dragover {
+    outline: 2px dashed #58a6ff;
+    outline-offset: -6px;
+}

@@ -1963,6 +1963,63 @@
         return block;
     }
 
+    /* Captures from different hops come from different machines, so they are
+     * picked one at a time far more often than together. A bare file input
+     * replaces its whole selection on every pick, which meant choosing the FTD
+     * capture silently discarded the client one - the input accepted multiple
+     * files and still ended up with a single vantage point, which is exactly
+     * the case this view cannot do anything with. Selections therefore
+     * accumulate here instead, and what is staged is listed so it can be seen
+     * and corrected.
+     */
+    var pathFiles = [];
+
+    function pathKey(file) {
+        return file.name + ":" + file.size + ":" + (file.lastModified || 0);
+    }
+
+    function addPathFiles(list) {
+        var known = {};
+        pathFiles.forEach(function (f) { known[pathKey(f)] = true; });
+        Array.prototype.forEach.call(list, function (file) {
+            if (known[pathKey(file)]) return;
+            known[pathKey(file)] = true;
+            pathFiles.push(file);
+        });
+        renderPathFiles();
+    }
+
+    function renderPathFiles() {
+        var host = document.getElementById("atlas-path-files");
+        if (!host) return;
+        host.innerHTML = "";
+        if (!pathFiles.length) {
+            host.appendChild(el("p", "atlas-corr-blurb",
+                "No captures staged yet. Add them one at a time or several at once - each file "
+                    + "is one vantage point, and they build up until you clear them."));
+            return;
+        }
+        host.appendChild(el("p", "atlas-report-picker-label",
+            pathFiles.length + " vantage point(s) staged"));
+        var list = el("div", "atlas-path-files");
+        pathFiles.forEach(function (file, index) {
+            var chip = el("span", "atlas-path-file");
+            chip.appendChild(el("span", "atlas-path-file-name", file.name));
+            chip.appendChild(el("span", "atlas-report-size",
+                Math.round(file.size / 1024) + " KB"));
+            var drop = el("button", "atlas-path-file-x", "\u2715");
+            drop.type = "button";
+            drop.setAttribute("aria-label", "Remove " + file.name);
+            drop.addEventListener("click", function () {
+                pathFiles.splice(index, 1);
+                renderPathFiles();
+            });
+            chip.appendChild(drop);
+            list.appendChild(chip);
+        });
+        host.appendChild(list);
+    }
+
     function renderPath(data) {
         var host = document.getElementById("atlas-path-results");
         if (!host) return;
@@ -2000,7 +2057,7 @@
     }
 
     function runPath(input, button, status) {
-        var files = input.files ? Array.prototype.slice.call(input.files) : [];
+        var files = pathFiles.slice();
         if (!files.length) {
             status.textContent = "Add the captures taken along the path first.";
             return;
@@ -2058,19 +2115,52 @@
         input.type = "file";
         input.multiple = true;
         input.accept = ".pcap,.pcapng,.cap";
+        input.addEventListener("change", function () {
+            addPathFiles(input.files);
+            // Cleared so that picking the same file again still fires change -
+            // otherwise removing a file and re-adding it does nothing.
+            input.value = "";
+        });
         var button = el("button", "atlas-corr-run", "Build the path");
         button.type = "button";
+        var clear = el("button", "atlas-hist-btn", "Clear staged captures");
+        clear.type = "button";
+        clear.addEventListener("click", function () {
+            pathFiles = [];
+            renderPathFiles();
+        });
         var status = el("span", "atlas-corr-status");
         status.setAttribute("role", "status");
         button.addEventListener("click", function () { runPath(input, button, status); });
         bar.appendChild(input);
         bar.appendChild(button);
+        bar.appendChild(clear);
         bar.appendChild(status);
         view.appendChild(bar);
+
+        var staged = el("div", null);
+        staged.id = "atlas-path-files";
+        view.appendChild(staged);
+
+        // Dropping several captures at once is the fastest way to stage them,
+        // and the same accumulate-rather-than-replace rule applies.
+        view.addEventListener("dragover", function (e) {
+            e.preventDefault();
+            view.classList.add("is-dragover");
+        });
+        view.addEventListener("dragleave", function () {
+            view.classList.remove("is-dragover");
+        });
+        view.addEventListener("drop", function (e) {
+            e.preventDefault();
+            view.classList.remove("is-dragover");
+            if (e.dataTransfer && e.dataTransfer.files) addPathFiles(e.dataTransfer.files);
+        });
 
         var results = el("div", null);
         results.id = "atlas-path-results";
         view.appendChild(results);
+        setTimeout(renderPathFiles, 0);
         return view;
     }
 

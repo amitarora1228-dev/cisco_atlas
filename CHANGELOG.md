@@ -35,6 +35,15 @@ under `[Unreleased]` until one is cut.
 
 ### Fixed
 
+- **The end-to-end path view could only ever hold one set of captures.** The
+  input accepted multiple files, but a file input *replaces* its selection on
+  every pick - and captures from different hops come from different machines,
+  so they are chosen one at a time far more often than together. Picking the
+  FTD capture silently discarded the client one, leaving a single vantage point
+  and nothing to stitch. Selections now accumulate, are listed with their sizes
+  and can be removed individually or cleared; duplicates are ignored and
+  dropping files onto the view works. Verified: two files then a third gives
+  three, re-adding the third leaves three, removing gives two.
 - **Nothing preformatted was readable in the darker theme.** The bundle engine
   ships `input, textarea, select, pre { background: #fff !important; color:
   var(--text-main) !important }` - a hardcoded white background paired with a

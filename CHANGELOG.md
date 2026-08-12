@@ -20,6 +20,19 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **A real packet ladder for every correlated flow the capture holds.** An
+  intercepted flow has a real client and a real server - the application on one
+  side, the destination it asked for on the other - so it has a real packet
+  ladder. The previous entry claimed otherwise; that was wrong, and the reason
+  was a limitation of this code rather than of the data:
+  `extract_wire_flows` kept only per-flow aggregates and discarded the packets.
+  It now keeps the opening and closing packets of each connection, and the
+  ladder is drawn from them: SYN, SYN/ACK, ACK, `Data 1211B`, FIN, RST, each on
+  the side that sent it. Where the capture does **not** hold the connection
+  there are still no packets, and the agent's log lines are shown instead,
+  labelled as its account rather than as traffic. Verified: 14-packet ladder
+  for `crl.prod.cagenerator.pki.strln.net`, lifelines `127.0.0.1:59897` and the
+  destination "via 127.0.0.1:52555", directions alternating correctly.
 - **A flow timeline for each correlated flow**, drawn as the capture engine
   draws a connection: a two-column fact grid, the artefact chain, then a ladder
   between two lifelines. The rows are the agent's own log lines **in order, not

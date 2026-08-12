@@ -1509,38 +1509,60 @@
         var events = timeline.events || [];
         if (!events.length) return "";
 
+        var fromPackets = timeline.source === "packets";
         var rows = events.map(function (event, index) {
             if (event.gap) {
                 return "<div class=\"lad-gap\" style=\"--i:" + index + "\">&ctdot; "
-                    + esc(event.gap) + " line(s) omitted &ctdot;</div>";
+                    + esc(event.gap) + (fromPackets ? " packet(s)" : " line(s)")
+                    + " omitted &ctdot;</div>";
             }
-            // The application leg on the left, the Secure Access leg on the
-            // right, matching the lifelines named above.
-            var dir = event.side === "tunnel" ? "s2c" : "c2s";
+            var dir = (event.side === "server" || event.side === "tunnel") ? "s2c" : "c2s";
             var bad = event.level === "E";
             return "<div class=\"lad-row dir-" + dir + (bad ? " lad-bad" : "")
                 + "\" style=\"--i:" + index + "\">"
                 + "<span class=\"lad-t\">" + esc(event.t === null || event.t === undefined
                     ? "—" : event.t + "s") + "</span>"
                 + "<span class=\"lad-wire\"><span class=\"lad-dot\"></span>"
-                + "<span class=\"lad-label\">" + esc(event.label) + "</span>"
-                + (bad ? "<span class=\"lad-anom\">error</span>" : "")
+                + "<span class=\"lad-label kind-" + esc(event.kind || "log") + "\">"
+                + esc(event.label) + "</span>"
+                + (bad ? "<span class=\"lad-anom\">" + (fromPackets ? "reset" : "error")
+                    + "</span>" : "")
                 + "</span></div>";
         }).join("");
 
+        var unit = fromPackets ? "packet" : "log line";
         var note = timeline.omitted
-            ? timeline.total + " log lines · middle " + timeline.omitted + " omitted"
-            : timeline.total + " log line" + (timeline.total === 1 ? "" : "s");
+            ? timeline.total + " " + unit + "s · middle " + timeline.omitted + " omitted"
+            : timeline.total + " " + unit + (timeline.total === 1 ? "" : "s");
+
+        // An intercepted flow has a real client and a real server: the
+        // application on one side, the destination it asked for on the other.
+        // Where the agent is in the middle, the peer the packets actually went
+        // to is named beneath, because that address is not the destination.
+        var client = flow.wire
+            ? String(flow.wire.label).split(" -> ")[0]
+            : "application · port " + flow.src_port;
+        var server = flow.destination;
+        var via = flow.wire && flow.wire.listener
+            && flow.wire.listener !== flow.destination
+            ? "<span class=\"lad-note\"> via " + esc(flow.wire.listener) + "</span>"
+            : "";
+
+        var blurb = fromPackets
+            ? "Drawn from the packets in the capture. The agent answers on behalf of the "
+                + "destination, so the left side is the application and the right side is the "
+                + "destination it asked for, reached through the listener named beside it."
+            : "The capture does not hold this connection, so there are no packets to draw. "
+                + "These are the agent's own log lines for the flow, in order. They are its "
+                + "account of what it did, not traffic observed on the wire.";
 
         return "<div class=\"detail-block ladder-block\">"
-            + "<h4>Flow timeline <span class=\"lad-note\">(" + esc(note) + ")</span></h4>"
-            + "<p class=\"atlas-corr-blurb\">These are the agent's own log lines for this flow, "
-            + "in order - not packets. The correlation does not read individual packets, so the "
-            + "two sides are the leg facing the application and the leg facing Secure Access, "
-            + "taken from the subsystem the agent named on each line.</p>"
+            + "<h4>" + (fromPackets ? "Connection flow" : "Agent log for this flow")
+            + " <span class=\"lad-note\">(" + esc(note) + ")</span></h4>"
+            + "<p class=\"atlas-corr-blurb\">" + blurb + "</p>"
             + "<div class=\"ladder\"><div class=\"lad-head\">"
-            + "<span class=\"lad-ep lad-ep-c\">application · port " + esc(flow.src_port) + "</span>"
-            + "<span class=\"lad-ep lad-ep-s\">" + esc(flow.tunnel || "Secure Access") + "</span>"
+            + "<span class=\"lad-ep lad-ep-c\">" + esc(client) + "</span>"
+            + "<span class=\"lad-ep lad-ep-s\">" + esc(server) + via + "</span>"
             + "</div><div class=\"lad-body\">" + rows + "</div></div></div>";
     }
 

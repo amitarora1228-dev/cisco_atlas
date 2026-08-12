@@ -41,7 +41,7 @@ import json
 import os
 import re
 import subprocess
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -139,6 +139,12 @@ class WireFlow:
     has_syn: bool = False
     """Whether the handshake was captured. If not, ``first_seen`` is when the
     capture began rather than when the connection opened."""
+    head: tuple[tuple[float, str, int, str, int], ...] = ()
+    tail: tuple[tuple[float, str, int, str, int], ...] = ()
+    """The opening and closing packets of the connection, as
+    ``(epoch, src_ip, src_port, kind, payload_bytes)``. An intercepted flow has
+    a real client and a real server, so it has a real packet ladder - these are
+    what draws it. The middle of a long flow is elided, and the count says so."""
 
     @property
     def is_loopback(self) -> bool:
@@ -334,7 +340,16 @@ _TSHARK_FIELDS = (
     "tls.handshake.extensions_server_name",
     "tcp.flags.syn",
     "tcp.flags.ack",
+    "tcp.flags.fin",
+    "tcp.flags.reset",
+    "tcp.len",
 )
+
+# How many packets of a connection are kept for its ladder, from each end. A
+# 7,256-packet flow is not readable and not worth holding in memory; the
+# opening and the ending are what a reader needs, and the elided middle is
+# stated rather than dropped silently.
+_PACKET_EDGE = 40
 
 
 def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> list[WireFlow]:
@@ -379,6 +394,9 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             sni,
             syn,
             ack,
+            fin,
+            rst,
+            payload,
         ) = parts[: len(_TSHARK_FIELDS)]
         if not stream or not sport or not dport:
             continue
@@ -390,6 +408,26 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             continue
 
         is_syn = syn in {"1", "True"} and ack not in {"1", "True"}
+        is_ack = ack in {"1", "True"}
+        try:
+            payload_bytes = int(payload) if payload else 0
+            moment = float(epoch) if epoch else 0.0
+        except ValueError:
+            payload_bytes = 0
+            moment = 0.0
+
+        if rst in {"1", "True"}:
+            kind = "rst"
+        elif fin in {"1", "True"}:
+            kind = "fin"
+        elif is_syn:
+            kind = "syn"
+        elif syn in {"1", "True"} and is_ack:
+            kind = "synack"
+        elif payload_bytes:
+            kind = "data"
+        else:
+            kind = "ack"
 
         rec = building.get(key)
         if rec is None:
@@ -404,6 +442,8 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
                 "first": when,
                 "last": when,
                 "anchored": False,
+                "head": [],
+                "tail": deque(maxlen=_PACKET_EDGE),
             }
             building[key] = rec
 
@@ -426,6 +466,11 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             )
         rec["packets"] += 1
         rec["bytes"] += size
+        event = (moment, src, int(sport), kind, payload_bytes)
+        if len(rec["head"]) < _PACKET_EDGE:
+            rec["head"].append(event)
+        else:
+            rec["tail"].append(event)
         if sni and not rec["sni"]:
             rec["sni"] = sni.split(",")[0].strip()
         if when:
@@ -447,6 +492,8 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             first_seen=rec["first"],
             last_seen=rec["last"],
             has_syn=rec["anchored"],
+            head=tuple(rec["head"]),
+            tail=tuple(rec["tail"]),
         )
         for key, rec in sorted(building.items())
     ]
@@ -943,22 +990,64 @@ def _flow_payload(flow: FlowCorrelation) -> dict:
         "statuses": statuses,
         "explanation": _explain_flow(flow),
         "evidence": evidence,
-        "timeline": _flow_timeline(app),
+        "timeline": _flow_timeline(flow),
     }
 
 
-def _flow_timeline(app: AppFlow) -> dict:
-    """The agent's own account of this flow, in order, ready to draw.
+_PACKET_LABELS = {
+    "syn": "SYN",
+    "synack": "SYN/ACK",
+    "fin": "FIN",
+    "rst": "RST",
+    "ack": "ACK",
+}
 
-    Shaped like the capture engine's packet timeline so the same ladder can
-    render it - but the events are **log lines, not packets**. The correlation
-    never reads individual packets, so the two lifelines are the leg facing the
-    application and the leg facing Secure Access, not a client and a server.
-    The caller states that on screen rather than letting the shape imply it.
+
+def _flow_timeline(flow: FlowCorrelation) -> dict:
+    """What happened on this flow, in order.
+
+    An intercepted flow has a real client and a real server - the application
+    on one side, the destination it asked for on the other - so where the
+    capture holds that connection this is a **packet** ladder, drawn from the
+    packets themselves.
+
+    Where the capture does not hold it, there are no packets to draw and the
+    agent's own log lines are shown instead. The two are never mixed and the
+    payload says which it is, because a reader must not take a line the agent
+    wrote for a packet that crossed the wire.
     """
+    if flow.wire is not None and (flow.wire.head or flow.wire.tail):
+        return _packet_timeline(flow.wire)
+    return _log_timeline(flow.app)
+
+
+def _packet_timeline(wire: WireFlow) -> dict:
+    head = list(wire.head)
+    tail = list(wire.tail)
+    kept = len(head) + len(tail)
+    omitted = max(wire.packets - kept, 0)
+    start = head[0][0] if head else (tail[0][0] if tail else 0.0)
+
+    rows = []
+    for index, event in enumerate(head + tail):
+        if omitted and index == len(head):
+            rows.append({"gap": omitted})
+        moment, src_ip, src_port, kind, payload = event
+        rows.append({
+            "t": round(moment - start, 4),
+            "side": "client" if (src_ip == wire.src_ip and src_port == wire.src_port) else "server",
+            "level": "E" if kind == "rst" else "I",
+            "kind": kind,
+            "label": _PACKET_LABELS.get(kind) or ("Data " + str(payload) + "B"),
+        })
+    return {"source": "packets", "total": wire.packets, "omitted": omitted, "events": rows}
+
+
+def _log_timeline(app: AppFlow) -> dict:
+    """The agent's own account, for a flow the capture does not hold."""
     events = list(app.events)
     if not events:
-        return {"total": 0, "omitted": 0, "events": []}
+        return {"source": "log", "total": 0, "omitted": 0, "events": []}
 
     start = next((when for when, _level, _side, _text in events if when), None)
     omitted = 0
@@ -977,12 +1066,13 @@ def _flow_timeline(app: AppFlow) -> dict:
             "t": offset,
             "side": side,
             "level": level,
+            "kind": "log",
             # The class is the same on every line of a flow, and the side chip
             # already says which subsystem it was. Leading with the method
             # leaves room for what the line actually reports.
             "label": re.sub(r"^[A-Za-z][A-Za-z0-9]*::", "", text),
         })
-    return {"total": len(app.events), "omitted": omitted, "events": rows}
+    return {"source": "log", "total": len(app.events), "omitted": omitted, "events": rows}
 
 
 def _explain_flow(flow: FlowCorrelation) -> str:

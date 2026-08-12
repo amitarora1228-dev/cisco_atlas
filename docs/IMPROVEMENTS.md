@@ -153,7 +153,24 @@ previous one**.
 
 ---
 
-## 8. Smaller items
+## 8. A ladder is only as good as the capture behind it
+
+**Evidence.** Of 340 intercepted flows in the test session, **2** had a packet
+ladder. The capture covers about two minutes; the ZTA log covers two days, so
+most flows simply happened outside it.
+
+**Why it matters.** The packet ladder is the most useful thing the correlation
+draws, and it exists only where the capture and the log overlap. Nothing is
+wrong - the tool says "not captured" plainly, and falls back to the agent's own
+account - but the feature is far more valuable than that hit rate suggests, and
+the hit rate is entirely a matter of how the evidence was collected.
+
+**What it needs.** Guidance where the artefacts are chosen, not code: capture
+*while* reproducing, and the ladder appears for the flows that matter.
+
+---
+
+## 9. Smaller items
 
 | Item | Evidence | Effort |
 |---|---|---|

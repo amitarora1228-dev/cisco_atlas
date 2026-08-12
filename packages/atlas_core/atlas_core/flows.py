@@ -1387,9 +1387,19 @@ def _correlate_flows(
 
         correlated.append(record)
 
+    # Flows the capture holds come first, because those are the ones that can
+    # be shown packet by packet - the strongest evidence this tool produces.
+    # Within each group the worst come first, so the ordering is "what can be
+    # proven, then what went wrong" rather than one at the expense of the other.
     order = {"problem": 0, "warning": 1, "info": 2}
     correlated.sort(
-        key=lambda f: (order[f.severity], -f.app.error_lines, f.app.dest, f.app.src_port)
+        key=lambda f: (
+            0 if f.wire is not None else 1,
+            order[f.severity],
+            -f.app.error_lines,
+            f.app.dest,
+            f.app.src_port,
+        )
     )
 
     if ambiguous_wire:

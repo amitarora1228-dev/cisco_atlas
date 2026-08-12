@@ -81,6 +81,12 @@ under `[Unreleased]` until one is cut.
 
 ### Changed
 
+- **Flows the capture holds are listed first.** Those are the ones that can be
+  shown packet by packet, which is the strongest evidence this tool produces.
+  Within each group the worst still come first, so the ordering reads "what can
+  be proven, then what went wrong" rather than one at the expense of the other.
+  Verified: the two capture-matched flows lead the table, followed by the
+  problem flows the capture does not hold.
 - **Correlated flows are presented as a flow table**, the way the capture engine
   presents its own: same columns, same severity pills, same expand-for-detail,
   same "Show only problems" and filter - and reusing that engine's classes

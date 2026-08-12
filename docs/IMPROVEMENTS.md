@@ -96,13 +96,15 @@ third occurrence is caught by CI rather than by a user.
 
 **Evidence.** 680 of 688 host-named lines in the test bundle were error level.
 With trace-level logging off the agent records the destination mainly when it
-has a problem to report. On the YouTube session, HAR hosts and ZTA-named hosts
-had **no** overlap: those flows were steered - 127 loopback flows with SNI prove
-it - but nothing failed at the ZTA layer, so no host-named line exists.
+has a problem to report.
 
-**Why it matters.** The tool states this honestly in a note, and a test asserts
-the note. But it means the flow view is a list of *problem* flows, and a reader
-who wants "show me every flow" will not get it from these inputs.
+**Why it matters.** It used to matter much more: the flow list was keyed on the
+agent's log, so every flow that worked was missing. Flows are now built from
+whichever artefact names them - the capture's TLS SNI and the HAR's hostnames
+count too - which took the BBC session from 2 drawable flows to 62. What
+remains is that the agent's *account* of a working flow is still absent, so
+those rows carry the wire and the browser but no reason, no close status and no
+tunnel.
 
 **Options.**
 

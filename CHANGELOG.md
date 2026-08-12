@@ -119,6 +119,15 @@ under `[Unreleased]` until one is cut.
 
 ### Fixed
 
+- **Flows that worked were missing entirely.** The flow list was keyed on the
+  ZTA log, and with trace-level logging off the agent names a destination only
+  when something goes wrong - so a capture full of loopback connections carrying
+  a hostname, and a HAR full of requests to it, produced no flow at all. A flow
+  now exists if **any** artefact names it, and each row records which one did.
+  Measured on the BBC pair: 2 packet ladders before, **62** after, out of 397
+  flows. A flow named by the capture alone does not claim the agent intercepted
+  it - no artefact says that - it states what the capture holds and that the
+  agent's log is silent.
 - **Exporting from the Bundle analysis page produced an almost empty report.**
   `innerText` returns only what is *rendered*, and the bundle output sits almost
   entirely inside a collapsed `<details>` ("All checks and full output"), so the

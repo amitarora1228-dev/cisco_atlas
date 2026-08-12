@@ -279,12 +279,20 @@ class FlowCorrelation:
     """One intercepted flow, followed across every artefact that saw it.
 
     This is the record the other views cannot produce: the destination the
-    application asked for, the agent's own account of what it did with that
-    connection and why it ended, the packets that carry it, and what the
-    browser got back.
+    application asked for, what the agent did with that connection and why it
+    ended, the packets that carry it, and what the browser got back.
+
+    A flow exists if **any** artefact names it. Keying only on the agent's log
+    lost every flow that worked: with trace logging off the agent writes the
+    destination only when something goes wrong, so a capture full of loopback
+    connections carrying a hostname - and a HAR full of requests to it -
+    produced no flow at all. The agent's account is one source among three,
+    not the price of admission.
     """
 
-    app: AppFlow
+    destination: str
+    src_port: int
+    app: AppFlow | None = None
     wire: WireFlow | None = None
     wire_strength: JoinStrength = JoinStrength.ASSOCIATED
     wire_basis: str = ""
@@ -297,11 +305,18 @@ class FlowCorrelation:
         return [r for r in self.requests if r.failed]
 
     @property
+    def label(self) -> str:
+        if self.app is not None:
+            return self.app.label
+        proto = "tls" if self.wire is not None and self.wire.sni else "tcp"
+        return f"{proto}:{self.src_port}__{self.destination}"
+
+    @property
     def severity(self) -> str:
         """Worst-first ordering, from what is actually recorded."""
-        if self.app.reasons or self.failures:
+        if (self.app is not None and self.app.reasons) or self.failures:
             return "problem"
-        if self.app.error_lines:
+        if self.app is not None and self.app.error_lines:
             return "warning"
         return "info"
 
@@ -945,7 +960,9 @@ def _flow_payload(flow: FlowCorrelation) -> dict:
         key = str(request.status) if request.status else "no response"
         statuses[key] = statuses.get(key, 0) + 1
 
-    evidence = [{"source": "bundle", "text": f"ZTA log names this flow {app.label}"}]
+    evidence = []
+    if app is not None:
+        evidence.append({"source": "bundle", "text": f"ZTA log names this flow {app.label}"})
     if flow.wire is not None:
         evidence.append({"source": "capture", "text": f"{flow.wire.label}, {flow.wire.packets} packet(s)"})
     if flow.tunnel is not None:
@@ -953,22 +970,30 @@ def _flow_payload(flow: FlowCorrelation) -> dict:
     if flow.requests:
         evidence.append({
             "source": "har",
-            "text": f"{len(flow.requests)} browser request(s) to {app.dest}",
+            "text": f"{len(flow.requests)} browser request(s) to {flow.destination}",
         })
 
     return {
-        "destination": app.dest,
-        "label": app.label,
+        "destination": flow.destination,
+        "label": flow.label,
         "severity": flow.severity,
-        "protocol": app.proto,
-        "src_port": app.src_port,
-        "stream": app.stream,
-        "first_seen": _iso(app.first_seen),
-        "last_seen": _iso(app.last_seen),
-        "agent_lines": app.lines,
-        "error_lines": app.error_lines,
-        "reasons": list(app.reasons),
-        "agent_errors": list(app.errors),
+        "protocol": app.proto if app is not None else ("tls" if flow.wire and flow.wire.sni else "tcp"),
+        "src_port": flow.src_port,
+        "stream": app.stream if app is not None else None,
+        "first_seen": _iso(app.first_seen if app is not None else (
+            flow.wire.first_seen if flow.wire is not None else None
+        )),
+        "last_seen": _iso(app.last_seen if app is not None else (
+            flow.wire.last_seen if flow.wire is not None else None
+        )),
+        "agent_lines": app.lines if app is not None else 0,
+        "error_lines": app.error_lines if app is not None else 0,
+        "reasons": list(app.reasons) if app is not None else [],
+        "agent_errors": list(app.errors) if app is not None else [],
+        "named_by": (
+            "bundle" if app is not None
+            else ("capture" if flow.wire is not None else "har")
+        ),
         "wire": (
             {
                 "label": flow.wire.label,
@@ -1018,7 +1043,9 @@ def _flow_timeline(flow: FlowCorrelation) -> dict:
     """
     if flow.wire is not None and (flow.wire.head or flow.wire.tail):
         return _packet_timeline(flow.wire)
-    return _log_timeline(flow.app)
+    if flow.app is not None:
+        return _log_timeline(flow.app)
+    return {"source": "none", "total": 0, "omitted": 0, "events": []}
 
 
 def _packet_timeline(wire: WireFlow) -> dict:
@@ -1083,10 +1110,18 @@ def _explain_flow(flow: FlowCorrelation) -> str:
     rather than reading as though more were known.
     """
     app = flow.app
-    parts = [
-        f"ZTA steering matched {app.dest}, so the agent intercepted the connection and "
-        f"handled it on source port {app.src_port}"
-    ]
+    if app is not None:
+        parts = [
+            f"ZTA steering matched {app.dest}, so the agent intercepted the connection and "
+            f"handled it on source port {app.src_port}"
+        ]
+    else:
+        # Named by the capture alone. Saying the agent "intercepted" it would
+        # be asserting something no artefact here states.
+        parts = [
+            f"The capture holds a connection from source port {flow.src_port} carrying TLS SNI "
+            f"{flow.destination}"
+        ]
 
     if flow.wire is not None:
         where = "the agent's local listener" if flow.wire.is_loopback else "the network"
@@ -1095,21 +1130,23 @@ def _explain_flow(flow: FlowCorrelation) -> str:
             f"{flow.wire.packets} packet(s)"
         )
 
-    if flow.tunnel is not None:
+    if flow.tunnel is not None and app is not None:
         parts.append(f"it was carried as stream {app.stream} on {flow.tunnel.label}")
 
-    if app.reasons:
+    if app is not None and app.reasons:
         for reason in app.reasons:
             meaning = _REASON_MEANING.get(reason)
             parts.append(
                 f"the agent closed it with reason '{reason}'"
                 + (f" - {meaning}" if meaning else "")
             )
-    elif app.error_lines:
+    elif app is not None and app.error_lines:
         parts.append(
             f"the agent logged {app.error_lines} error line(s) against it but recorded no "
             "close reason"
         )
+    elif app is None:
+        parts.append("the agent's log says nothing about it")
 
     if flow.failures:
         codes = sorted({str(r.status) for r in flow.failures if r.status})
@@ -1341,7 +1378,12 @@ def _correlate_flows(
     correlated: list[FlowCorrelation] = []
 
     for app in app_flows:
-        record = FlowCorrelation(app=app, requests=list(requests_by_host.get(app.dest, [])))
+        record = FlowCorrelation(
+            destination=app.dest,
+            src_port=app.src_port,
+            app=app,
+            requests=list(requests_by_host.get(app.dest, [])),
+        )
 
         candidates = by_port.get(app.src_port, [])
         if len(candidates) == 1:
@@ -1387,6 +1429,35 @@ def _correlate_flows(
 
         correlated.append(record)
 
+    # Flows the capture named but the agent did not.
+    #
+    # With trace-level logging off the agent writes a destination only when it
+    # has a problem to report, so every flow that *worked* was missing from
+    # this list entirely - including the ones the user actually came to look
+    # at. The capture names them itself, in TLS SNI, alongside the source port
+    # and the packets. That is a whole flow with no help from the log, so it
+    # belongs here, marked as named by the capture rather than the bundle.
+    claimed = {id(f.wire) for f in correlated if f.wire is not None}
+    for wire in wire_flows:
+        if not wire.sni or id(wire) in claimed:
+            continue
+        correlated.append(FlowCorrelation(
+            destination=wire.sni,
+            src_port=wire.src_port,
+            wire=wire,
+            wire_strength=JoinStrength.OBSERVED,
+            wire_basis=(
+                f"The capture holds this connection and it carried TLS SNI {wire.sni}: "
+                f"{wire.label}, {wire.packets} packet(s)."
+            ),
+            tunnel_basis=(
+                "The agent logged nothing about this flow. With trace-level logging off it "
+                "records a destination mainly when it has a problem to report, so silence here "
+                "is not a verdict either way."
+            ),
+            requests=list(requests_by_host.get(wire.sni, [])),
+        ))
+
     # Flows the capture holds come first, because those are the ones that can
     # be shown packet by packet - the strongest evidence this tool produces.
     # Within each group the worst come first, so the ordering is "what can be
@@ -1396,9 +1467,9 @@ def _correlate_flows(
         key=lambda f: (
             0 if f.wire is not None else 1,
             order[f.severity],
-            -f.app.error_lines,
-            f.app.dest,
-            f.app.src_port,
+            -(f.app.error_lines if f.app is not None else 0),
+            f.destination,
+            f.src_port,
         )
     )
 

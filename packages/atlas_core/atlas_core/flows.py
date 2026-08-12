@@ -943,6 +943,7 @@ def as_payload(session: SessionCorrelation) -> dict:
     ]
 
     unknown = [h for h in session.hosts if h.steering is Steering.UNKNOWN]
+    clusters = _reason_clusters(session.flows)
     return {
         "summary": {
             "hosts": len(session.hosts),
@@ -963,7 +964,7 @@ def as_payload(session: SessionCorrelation) -> dict:
         },
         "hosts": sorted(hosts, key=lambda h: (-h["requests"], h["host"])),
         "tunnels": tunnels,
-        "flows": [_flow_payload(flow) for flow in session.flows],
+        "flows": [_flow_payload(flow, clusters) for flow in session.flows],
         "notes": session.notes,
         "sources": session.sources,
     }
@@ -981,8 +982,133 @@ _REASON_MEANING = {
     "connect_transport": "the agent could not start the onward transport",
 }
 
+# What a reader might do next about each reason.
+#
+# This is the one place in this tool that is not derived from the inputs, and
+# it is labelled as such wherever it is shown. It is general knowledge about
+# what the token means and what usually explains it - deliberately phrased as
+# things to check, never as a diagnosis, because the agent records what it did
+# and not why the far end behaved as it did. The evidence-based half of the
+# answer is computed separately, in ``_reason_clusters``.
+_REASON_GUIDANCE = {
+    "next_transport_state": {
+        "causes": [
+            "The tunnel underneath was rebuilt while the flow was open - a network change, "
+            "roaming between Wi-Fi and wired, or a sleep/wake will all do this.",
+            "The headend reset or migrated the connection carrying this flow.",
+            "The agent re-evaluated steering mid-flow, for example after trusted-network "
+            "detection changed its mind about the network.",
+        ],
+        "checks": [
+            "Check the Server Connectivity and network-change events in the bundle around this "
+            "timestamp.",
+            "Ask whether the user moved network, docked or undocked, or resumed from sleep.",
+        ],
+    },
+    "socket_read": {
+        "causes": [
+            "The local application closed the connection - a browser tab closed, a request "
+            "cancelled, or the app timed out on its own.",
+            "The application crashed or was killed while the flow was open.",
+            "The agent could not read the request because the app never finished sending it.",
+        ],
+        "checks": [
+            "Check whether the same destination succeeded on another flow moments later; a "
+            "retry that worked points at the application, not the path.",
+            "If a HAR was collected, look for the same request there and what the browser "
+            "recorded for it.",
+        ],
+    },
+    "socket_write": {
+        "causes": [
+            "The local application stopped reading the response and the agent could not hand "
+            "it back.",
+            "The application closed while a response was in flight.",
+        ],
+        "checks": [
+            "Check whether the response was large or slow - an app that gives up mid-download "
+            "looks exactly like this.",
+        ],
+    },
+    "connect_timeout": {
+        "causes": [
+            "The private resource did not answer through the tunnel.",
+            "The resource connector or CNHE in front of it was down or unreachable.",
+            "Access policy did not permit this destination, and the connection was dropped "
+            "rather than refused.",
+        ],
+        "checks": [
+            "Confirm the resource is reachable from the connector's own network.",
+            "Check the access policy for this destination and this user.",
+            "Check whether every flow to this destination timed out, or only some - partial "
+            "failure points at capacity or one unhealthy connector.",
+        ],
+    },
+    "tunnel_connect": {
+        "causes": [
+            "The agent could not establish the tunnel it needed for this destination.",
+            "Enrollment or posture was not in a state that permits the tunnel.",
+        ],
+        "checks": [
+            "Check enrollment state and any enrollment errors in the bundle.",
+            "Check that the ZTA network requirements are reachable on 443 (TCP and UDP): "
+            "*.ztna.sse.cisco.com, *.zpc.sse.cisco.com, *.tia.sse.cisco.com.",
+        ],
+    },
+    "connect_transport": {
+        "causes": [
+            "The onward transport could not be started - typically the headend connection was "
+            "not available at that moment.",
+        ],
+        "checks": [
+            "Check for server connectivity events in the bundle around this timestamp.",
+        ],
+    },
+}
 
-def _flow_payload(flow: FlowCorrelation) -> dict:
+# How close in time two flows must fail for the failure to be worth calling
+# shared. A minute is long enough to catch a tunnel rebuild taking several
+# flows down with it, and short enough that two unrelated failures in a busy
+# session are not reported as one event.
+_REASON_CLUSTER_WINDOW = timedelta(seconds=60)
+
+
+def _reason_clusters(flows: list[FlowCorrelation]) -> dict[int, dict]:
+    """For each failing flow, how many others failed the same way at the same time.
+
+    This is the part of the answer that *is* evidence. One flow closing with
+    ``next_transport_state`` says almost nothing; fourteen closing that way
+    inside a minute says the transport went away and took them all with it,
+    which is a different problem with a different owner. Keyed by ``id`` so it
+    can be attached without changing the flow objects.
+    """
+    failing = [
+        (f, f.app.first_seen)
+        for f in flows
+        if f.app is not None and f.app.reasons and f.app.first_seen is not None
+    ]
+    clusters: dict[int, dict] = {}
+    for flow, when in failing:
+        for reason in flow.app.reasons:
+            peers = [
+                other
+                for other, other_when in failing
+                if other is not flow
+                and reason in other.app.reasons
+                and abs(other_when - when) <= _REASON_CLUSTER_WINDOW
+            ]
+            if not peers:
+                continue
+            destinations = sorted({p.destination for p in peers})
+            clusters.setdefault(id(flow), {})[reason] = {
+                "count": len(peers),
+                "destinations": destinations[:6],
+                "distinct_destinations": len(destinations),
+            }
+    return clusters
+
+
+def _flow_payload(flow: FlowCorrelation, clusters: dict[int, dict] | None = None) -> dict:
     """One intercepted flow, with every claim carrying the artefact behind it."""
     app = flow.app
     statuses: dict[str, int] = {}
@@ -1048,6 +1174,16 @@ def _flow_payload(flow: FlowCorrelation) -> dict:
         "explanation": _explain_flow(flow),
         "evidence": evidence,
         "timeline": _flow_timeline(flow),
+        "guidance": [
+            {
+                "reason": reason,
+                "meaning": _REASON_MEANING.get(reason, ""),
+                "causes": _REASON_GUIDANCE.get(reason, {}).get("causes", []),
+                "checks": _REASON_GUIDANCE.get(reason, {}).get("checks", []),
+                "shared": (clusters or {}).get(id(flow), {}).get(reason),
+            }
+            for reason in (app.reasons if app is not None else ())
+        ],
     }
 
 

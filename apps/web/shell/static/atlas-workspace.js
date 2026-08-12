@@ -1328,9 +1328,12 @@
         var wrap = el("div", "table-wrap");
         var table = el("table", "ftable");
         table.innerHTML = "<thead><tr>"
-            + "<th></th><th>Time</th><th>Severity</th><th>Source</th>"
-            + "<th>Destination asked for</th><th>Intercepted by</th><th>Carried by</th>"
-            + "<th>On the wire</th><th>Error / Issue</th>"
+            + "<th></th><th>Time</th><th>Severity" + info("severity") + "</th>"
+            + "<th>Source" + info("source") + "</th>"
+            + "<th>Destination asked for" + info("destination") + "</th>"
+            + "<th>Intercepted by" + info("intercepted") + "</th>"
+            + "<th>Carried by" + info("carried") + "</th>"
+            + "<th>On the wire" + info("wire") + "</th><th>Error / Issue</th>"
             + "</tr></thead>";
         var body = document.createElement("tbody");
         table.appendChild(body);
@@ -1458,6 +1461,16 @@
             + "<span class=\"mono\">" + esc(value) + "</span></div>";
     }
 
+    /* Same, but the label may carry an info icon. Kept separate rather than
+     * relaxing kv(): kv escapes its label, and a single function that
+     * sometimes does and sometimes does not is how unescaped user data ends up
+     * in the DOM. Only the fixed glossary key is trusted here. */
+    function kvi(label, key, value) {
+        if (value === null || value === undefined || value === "") return "";
+        return "<div class=\"kv\"><b>" + esc(label) + info(key) + "</b>"
+            + "<span class=\"mono\">" + esc(value) + "</span></div>";
+    }
+
     function flowDetailHtml(flow) {
         var hops = [
             ["Browser", "har", flow.requests
@@ -1483,7 +1496,7 @@
             + kv("Agent flow", flow.label)
             + kv("Source port", flow.src_port)
             + kv("Protocol", flow.protocol)
-            + kv("Stream", flow.stream)
+            + kvi("Stream", "stream", flow.stream)
             + kv("First seen", flow.first_seen)
             + kv("Last seen", flow.last_seen)
             + kv("Agent log lines", flow.agent_lines)
@@ -1496,8 +1509,8 @@
             + kv("On the wire", flow.wire
                 ? flow.wire.label + " · " + flow.wire.packets + " packet(s)"
                 : "not in the capture")
-            + kv("Listener", flow.wire ? flow.wire.listener : null)
-            + kv("Handshake captured", flow.wire ? (flow.wire.handshake_captured ? "yes" : "no") : null)
+            + kvi("Listener", "listener", flow.wire ? flow.wire.listener : null)
+            + kvi("Handshake captured", "handshake", flow.wire ? (flow.wire.handshake_captured ? "yes" : "no") : null)
             + kv("Browser requests", flow.requests || null)
             + kv("Failed requests", flow.failures || null)
             + kv("Status codes", statuses)
@@ -1518,12 +1531,120 @@
 
         html += flowLadder(flow);
 
+        html += flowGuidance(flow);
+
         html += "<div class=\"atlas-flow-basis\">";
         [flow.intercepted_basis, flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
             if (text) html += "<p>" + esc(text) + "</p>";
         });
         html += "</div>";
         return html;
+    }
+
+    /* What to do about a failing flow.
+     *
+     * Two halves, kept visibly apart, because they are worth different
+     * amounts. "Shared with other flows" is measured from the inputs: if
+     * fourteen flows closed with the same reason inside a minute, the transport
+     * went away and took them all with it, and chasing this one destination is
+     * wasted effort. "Possible causes" is general knowledge about the reason
+     * code and is labelled as such - it is the only text in this tool not
+     * derived from the artefacts, and saying so is what keeps the rest of the
+     * output trustworthy.
+     */
+    function flowGuidance(flow) {
+        var items = (flow.guidance || []).filter(function (g) {
+            return g.causes.length || g.checks.length || g.shared;
+        });
+        if (!items.length) return "";
+
+        var html = "<div class=\"detail-block atlas-guide\"><h4>What this means, and what to check"
+            + info("guidance") + "</h4>";
+
+        items.forEach(function (g) {
+            html += "<div class=\"atlas-guide-reason\">";
+            html += "<p class=\"atlas-guide-head\"><code>" + esc(g.reason) + "</code> - "
+                + esc(g.meaning) + "</p>";
+
+            if (g.shared) {
+                var many = g.shared.distinct_destinations > 1;
+                html += "<p class=\"atlas-guide-measured\"><strong>Measured:</strong> "
+                    + esc(g.shared.count) + " other flow(s) closed with <code>" + esc(g.reason)
+                    + "</code> within a minute of this one, across "
+                    + esc(g.shared.distinct_destinations) + " destination(s)"
+                    + (g.shared.destinations.length
+                        ? " (" + esc(g.shared.destinations.join(", ")) + ")" : "")
+                    + ". " + (many
+                        ? "Several destinations failing together points at the tunnel or the "
+                            + "network underneath, not at this destination."
+                        : "They share a destination, so this looks specific to it rather than "
+                            + "to the tunnel.")
+                    + "</p>";
+            } else {
+                html += "<p class=\"atlas-guide-measured\"><strong>Measured:</strong> no other "
+                    + "flow closed this way within a minute, so this did not come with a wider "
+                    + "event.</p>";
+            }
+
+            if (g.causes.length) {
+                html += "<p class=\"atlas-guide-label\">Possible causes <span class=\"atlas-guide-gen\">"
+                    + "general guidance, not a finding from your files</span></p><ul>";
+                g.causes.forEach(function (c) { html += "<li>" + esc(c) + "</li>"; });
+                html += "</ul>";
+            }
+            if (g.checks.length) {
+                html += "<p class=\"atlas-guide-label\">What to check next</p><ul>";
+                g.checks.forEach(function (c) { html += "<li>" + esc(c) + "</li>"; });
+                html += "</ul>";
+            }
+            html += "</div>";
+        });
+        return html + "</div>";
+    }
+
+    /* Terms this tool uses that a reader has no reason to already know.
+     *
+     * The output is dense with vocabulary borrowed from three different places
+     * - the agent's own tokens, Wireshark's, and this tool's own joins - and a
+     * reader cannot act on a word they have to guess at. Each of these gets a
+     * small "i" they can hover.
+     */
+    var GLOSSARY = {
+        "guidance": "The 'Measured' line is worked out from your files. 'Possible causes' is "
+            + "general knowledge about the reason code and is not derived from them - it is the "
+            + "only text here that is not evidence.",
+        "severity": "High means the agent closed this flow with an error reason, or requests on "
+            + "it failed. Medium means the agent logged errors about it but it was not closed on "
+            + "one. OK means nothing in any artefact reported a problem with it.",
+        "destination": "The hostname the application asked for. It comes from the agent's log "
+            + "where the agent named the flow, and from the TLS SNI in the capture otherwise.",
+        "intercepted": "Which agent or path handled the flow. ZTA is proved by the bundle naming "
+            + "the flow or by it going to the agent's own local listener. A VPN is reported as "
+            + "'consistent with' because a capture cannot read an adapter's name.",
+        "carried": "The tunnel the flow travelled on, joined by its HTTP/2 stream number. Stream "
+            + "numbers restart on every connection, so where several tunnels report the same "
+            + "stream the tunnel genuinely cannot be named.",
+        "wire": "How many packets of this connection the capture holds. 'not captured' means the "
+            + "connection is absent from the capture, not that it did not happen.",
+        "source": "The local TCP port the application used. It is the key the agent records and "
+            + "the capture shows, which is what lets the two be joined at all.",
+        "stream": "The HTTP/2 stream number the agent gave this flow inside its tunnel. Many "
+            + "flows share one tunnel, each on its own stream.",
+        "listener": "The agent's own local address and port. Traffic reaching it was intercepted "
+            + "on the machine rather than sent straight to the destination.",
+        "handshake": "Whether the capture holds the connection's opening SYN. Without it the "
+            + "first timestamp is when the capture started, not when the connection opened.",
+        "sni": "Server Name Indication - the hostname the client sends in the clear during the "
+            + "TLS handshake, which is how a capture can name an encrypted destination.",
+        "har": "An HTTP Archive exported from the browser's developer tools. It holds URLs, "
+            + "status codes and timings that a packet capture cannot see inside TLS."
+    };
+
+    function info(key) {
+        var text = GLOSSARY[key];
+        if (!text) return "";
+        return "<span class=\"atlas-info\" tabindex=\"0\" role=\"note\" aria-label=\""
+            + esc(text) + "\" title=\"" + esc(text) + "\">i</span>";
     }
 
     function flowLadder(flow) {

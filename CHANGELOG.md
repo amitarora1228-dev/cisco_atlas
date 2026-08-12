@@ -35,6 +35,28 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **A failing flow now says what to do about it**, in two visibly separate
+  halves because they are worth different amounts. The **Measured** half is
+  computed from the artefacts: how many other flows closed with the same reason
+  within a minute, and across how many destinations. On the session in hand the
+  `next_transport_state` flow the reader asked about turned out to be one of
+  **6 flows closing that way inside a minute across 5 different destinations** -
+  which points at the tunnel underneath rather than at the destination, and is
+  a conclusion no single flow could support. The **Possible causes** half is
+  general knowledge about the reason code and is labelled *"general guidance,
+  not a finding from your files"* - it is the only text in the tool not derived
+  from the inputs, and saying so is what keeps the rest trustworthy. Covers
+  `next_transport_state`, `socket_read`, `socket_write`, `connect_timeout`,
+  `tunnel_connect` and `connect_transport`.
+
+- **Hoverable "i" explanations on the vocabulary.** The flow table borrows
+  words from three places - the agent's own tokens, Wireshark's, and this
+  tool's joins - and a reader cannot act on a word they have to guess at.
+  Twelve terms (severity, SNI, listener, stream, handshake, HAR and the rest)
+  now carry a small hoverable icon. The severity one states the actual rule:
+  High means the agent closed the flow on an error reason or its requests
+  failed.
+
 - **An end-to-end path view.** Captures taken at several points of a path -
   client, Zproxy egress, FTD, resource - are stitched into one chain, and the
   order of the hops is inferred rather than asked for: where a proxy joins two

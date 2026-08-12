@@ -1102,3 +1102,54 @@ body.atlas-workspace .layout {
     opacity: 0.75;
     margin: 0.25rem 0;
 }
+
+/* --- glossary icons and flow guidance ------------------------------------ */
+.atlas-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    margin-left: 0.3rem;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    font-size: 9px;
+    font-style: italic;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0.55;
+    cursor: help;
+    vertical-align: middle;
+}
+.atlas-info:hover,
+.atlas-info:focus { opacity: 1; }
+.atlas-guide { grid-column: 1 / -1; }
+.atlas-guide-reason {
+    border-top: 1px solid var(--atlas-border, #30363d);
+    padding-top: 0.5rem;
+    margin-top: 0.5rem;
+}
+.atlas-guide-reason:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.atlas-guide-head { margin: 0 0 0.4rem; font-size: 0.85rem; }
+.atlas-guide-measured {
+    margin: 0 0 0.5rem;
+    font-size: 0.83rem;
+    border-left: 2px solid #58a6ff;
+    padding-left: 0.6rem;
+}
+.atlas-guide-label {
+    margin: 0.5rem 0 0.2rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+}
+.atlas-guide-gen {
+    text-transform: none;
+    letter-spacing: 0;
+    font-style: italic;
+    opacity: 0.75;
+    margin-left: 0.3rem;
+}
+.atlas-guide ul { margin: 0.1rem 0 0; padding-left: 1.1rem; }
+.atlas-guide li { font-size: 0.83rem; margin: 0.15rem 0; }

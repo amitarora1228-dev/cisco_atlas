@@ -272,8 +272,18 @@ it had trouble with. A destination absent from it is one the agent logged no
 problem for — **not** one known to have worked. That sentence is emitted as a
 note on every run, and a test asserts it.
 
-### Two things it deliberately does not do
+### The one place output is not evidence
 
+`_REASON_GUIDANCE` in `flows.py` holds likely causes and next steps per close
+reason. It is **general knowledge about the token, not derived from any
+artefact**, and the UI labels it *"general guidance, not a finding from your
+files"* every time it is shown. It sits directly beneath a **Measured** line
+that *is* derived from the inputs — how many other flows closed the same way
+within a minute, across how many destinations — so the reader can see which of
+the two they are relying on. If that separation is ever collapsed for tidiness,
+the tool starts asserting causes it cannot support.
+
+### Two things it deliberately does not do
 - **It does not hardcode a vendor synthetic-IP range.** A server address is
   called synthetic because it appears in the HAR and never appears as a peer in
   the capture — provable from the inputs, and it does not break when the range

@@ -1254,31 +1254,64 @@
     /* The flow list: one intercepted connection, followed across every
      * artefact that saw it.
      *
-     * This is the view the counts above cannot give. ZTA steers on rules
-     * written against hosts and addresses, so when a rule matches, the agent
-     * names the destination the application asked for - and that name is the
-     * key the HAR shares and the source port beside it is the key the capture
-     * shares. Each hop states the artefact it came from, so a reader can see
-     * which part of the story is measured and which is the agent's account.
+     * Presented as the capture engine presents its own flows - the same table,
+     * the same severity pills, the same expand-for-detail - and reusing that
+     * engine's classes rather than inventing a second style for the same idea.
+     * A reader who has learned one table has learned both.
      */
     var FLOW_SEVERITY = {
-        problem: { label: "Failed", cls: "is-problem" },
-        warning: { label: "Errors logged", cls: "is-warning" },
-        info: { label: "No fault logged", cls: "is-info" }
+        problem: { pill: "high", label: "high" },
+        warning: { pill: "medium", label: "medium" },
+        info: { pill: "ok", label: "OK" }
     };
+
+    var flowOnlyProblems = false;
+    var flowFilterText = "";
+
+    function esc(value) {
+        return String(value === null || value === undefined ? "" : value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+    }
+
+    function flowTime(iso) {
+        if (!iso) return "—";
+        var match = /T(\d{2}:\d{2}:\d{2})/.exec(iso);
+        return match ? match[1] : iso;
+    }
 
     function correlateFlows(data) {
         var flows = data.flows || [];
         var section = el("section", "atlas-corr-block");
-        section.appendChild(el("h3", null, "Intercepted flows, end to end"));
+
+        var head = el("div", "flows-head");
+        head.appendChild(el("h3", null, "Intercepted flows, end to end"));
+        var filters = el("div", "filters");
+        var label = el("label", "switch");
+        var toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = flowOnlyProblems;
+        label.appendChild(toggle);
+        label.appendChild(el("span", null, "Show only problems"));
+        var search = document.createElement("input");
+        search.className = "flow-filter";
+        search.placeholder = "filter by destination…";
+        search.value = flowFilterText;
+        filters.appendChild(label);
+        filters.appendChild(search);
+        head.appendChild(filters);
+        section.appendChild(head);
+
         section.appendChild(el(
             "p",
             "atlas-corr-blurb",
             "ZTA steers on rules written against hosts and addresses, so where a rule "
                 + "matched, the bundle names the destination the application asked for and the "
                 + "source port it used. That name is what the browser recorded, and that port is "
-                + "what the capture saw - which is how one flow can be followed through all "
-                + "three. Worst first."
+                + "what the capture saw - which is how one flow is followed through all three. "
+                + "Open a row for the whole chain and the evidence behind it."
         ));
 
         if (!flows.length) {
@@ -1291,80 +1324,150 @@
             return section;
         }
 
-        var shown = flows.slice(0, 60);
-        shown.forEach(function (flow) {
-            section.appendChild(flowCard(flow));
+        var wrap = el("div", "table-wrap");
+        var table = el("table", "ftable");
+        table.innerHTML = "<thead><tr>"
+            + "<th></th><th>Time</th><th>Severity</th><th>Source</th>"
+            + "<th>Destination asked for</th><th>Carried by</th><th>Protocol</th>"
+            + "<th>On the wire</th><th>Error / Issue</th>"
+            + "</tr></thead>";
+        var body = document.createElement("tbody");
+        table.appendChild(body);
+        wrap.appendChild(table);
+        section.appendChild(wrap);
+
+        var empty = el("p", "atlas-corr-empty", "");
+        section.appendChild(empty);
+
+        var draw = function () {
+            renderFlowRows(body, empty, flows);
+        };
+        toggle.addEventListener("change", function () {
+            flowOnlyProblems = toggle.checked;
+            draw();
         });
-        if (flows.length > shown.length) {
-            section.appendChild(el(
-                "p",
-                "atlas-corr-empty",
-                "Showing the first " + shown.length + " of " + flows.length + " flows, worst first."
-            ));
-        }
+        search.addEventListener("input", function () {
+            flowFilterText = search.value.trim().toLowerCase();
+            draw();
+        });
+        draw();
         return section;
     }
 
-    function flowCard(flow) {
-        var tone = FLOW_SEVERITY[flow.severity] || FLOW_SEVERITY.info;
-        var card = el("article", "atlas-flow " + tone.cls);
-
-        var head = el("header", "atlas-flow-head");
-        head.appendChild(el("span", "atlas-flow-dest", flow.destination));
-        head.appendChild(el("span", "atlas-flow-badge", tone.label));
-        if (flow.reasons && flow.reasons.length) {
-            head.appendChild(el("span", "atlas-flow-reason", flow.reasons.join(", ")));
-        }
-        card.appendChild(head);
-
-        card.appendChild(el("p", "atlas-flow-why", flow.explanation));
-
-        // The chain, one hop per artefact, each labelled with where it came
-        // from. A hop with no evidence says so rather than being omitted -
-        // a gap the reader cannot see is a gap they will assume was filled.
-        var chain = el("div", "atlas-flow-chain");
-        chain.appendChild(flowHop("Browser", "har",
-            flow.requests
-                ? flow.requests + " request(s)"
-                  + (flow.failures ? ", " + flow.failures + " failed" : "")
-                : "not in the HAR"));
-        chain.appendChild(flowHop("Agent", "bundle",
-            flow.label + (flow.stream !== null && flow.stream !== undefined
-                ? " · stream " + flow.stream : "")));
-        chain.appendChild(flowHop("Wire", "capture",
-            flow.wire
-                ? flow.wire.label + " · " + flow.wire.packets + " packet(s)"
-                : "not in the capture"));
-        chain.appendChild(flowHop("Tunnel", "bundle", flow.tunnel || "not identified"));
-        card.appendChild(chain);
-
-        var basis = el("div", "atlas-flow-basis");
-        [flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
-            if (text) basis.appendChild(el("p", null, text));
+    function renderFlowRows(body, empty, flows) {
+        body.innerHTML = "";
+        var rows = flows.filter(function (flow) {
+            if (flowOnlyProblems && flow.severity === "info") return false;
+            if (!flowFilterText) return true;
+            return String(flow.destination).toLowerCase().indexOf(flowFilterText) !== -1;
         });
-        if (basis.childNodes.length) card.appendChild(basis);
 
-        if (flow.agent_errors && flow.agent_errors.length) {
-            var events = el("div", "atlas-flow-events");
-            flow.agent_errors.slice(0, 4).forEach(function (line) {
-                var row = el("div", "atlas-corr-event is-error");
-                row.appendChild(el("span", "atlas-corr-event-tag", "agent"));
-                row.appendChild(el("span", null, line));
-                events.appendChild(row);
-            });
-            card.appendChild(events);
+        if (!rows.length) {
+            empty.textContent = flowOnlyProblems
+                ? "No flow with a fault matches. Turn off \"Show only problems\" to see the rest."
+                : "No flow matches that filter.";
+            empty.classList.remove("hidden");
+            return;
         }
-        return card;
+        empty.textContent = rows.length + " of " + flows.length + " flow(s), worst first.";
+        empty.classList.remove("hidden");
+
+        var fragment = document.createDocumentFragment();
+        rows.slice(0, 200).forEach(function (flow) {
+            var tone = FLOW_SEVERITY[flow.severity] || FLOW_SEVERITY.info;
+            var row = document.createElement("tr");
+            row.className = "row sev-" + tone.pill;
+
+            var problem = flow.reasons.length
+                ? flow.reasons.join(", ")
+                : (flow.failures
+                    ? flow.failures + " failed request(s)"
+                    : (flow.error_lines ? flow.error_lines + " error line(s)" : "—"));
+
+            row.innerHTML = "<td><span class=\"caret\">&#9654;</span></td>"
+                + "<td class=\"time-cell mono\">" + esc(flowTime(flow.first_seen)) + "</td>"
+                + "<td><span class=\"sev-pill sp-" + tone.pill + "\">" + esc(tone.label) + "</span></td>"
+                + "<td class=\"mono\">port " + esc(flow.src_port) + "</td>"
+                + "<td class=\"sni-cell\">" + esc(flow.destination)
+                + (flow.requests ? " <span class=\"badge badge-har\">HAR</span>" : "") + "</td>"
+                + "<td class=\"mono\">" + (flow.tunnel
+                    ? esc(flow.tunnel) : "<span class=\"muted\">not identified</span>") + "</td>"
+                + "<td>" + esc(flow.protocol)
+                + (flow.stream === null || flow.stream === undefined
+                    ? "" : " <span class=\"muted\">stream " + esc(flow.stream) + "</span>") + "</td>"
+                + "<td class=\"mono\">" + (flow.wire
+                    ? esc(flow.wire.packets) + " pkt"
+                    : "<span class=\"muted\">not captured</span>") + "</td>"
+                + "<td class=\"" + (flow.severity === "info" ? "err-cell okish" : "err-cell")
+                + "\">" + esc(problem) + "</td>";
+
+            var detail = document.createElement("tr");
+            detail.className = "detail-row hidden";
+            var built = false;
+            row.addEventListener("click", function () {
+                if (!built) {
+                    detail.innerHTML = "<td colspan=\"9\">" + flowDetailHtml(flow) + "</td>";
+                    built = true;
+                }
+                row.classList.toggle("open");
+                detail.classList.toggle("hidden");
+            });
+
+            fragment.appendChild(row);
+            fragment.appendChild(detail);
+        });
+        body.appendChild(fragment);
+        if (rows.length > 200) {
+            empty.textContent = "Showing the first 200 of " + rows.length + " flow(s), worst first.";
+        }
     }
 
-    function flowHop(title, source, value) {
-        var hop = el("div", "atlas-flow-hop" + (
-            /not /.test(value) ? " is-missing" : ""
-        ));
-        hop.appendChild(el("span", "atlas-flow-hop-title", title));
-        hop.appendChild(el("span", "atlas-flow-hop-value", value));
-        hop.appendChild(el("span", "atlas-flow-hop-src", source));
-        return hop;
+    /* The chain, one hop per artefact, each labelled with where it came from.
+     * A hop with no evidence says so rather than being omitted - a gap the
+     * reader cannot see is a gap they will assume was filled. */
+    function flowDetailHtml(flow) {
+        var hops = [
+            ["Browser", "har", flow.requests
+                ? flow.requests + " request(s)"
+                    + (flow.failures ? ", " + flow.failures + " failed" : "")
+                : "not in the HAR"],
+            ["Agent", "bundle", flow.label
+                + (flow.stream === null || flow.stream === undefined ? "" : " · stream " + flow.stream)],
+            ["Wire", "capture", flow.wire
+                ? flow.wire.label + " · " + flow.wire.packets + " packet(s)"
+                : "not in the capture"],
+            ["Tunnel", "bundle", flow.tunnel || "not identified"]
+        ];
+
+        var html = "<p class=\"atlas-flow-why\">" + esc(flow.explanation) + "</p>";
+        html += "<div class=\"atlas-flow-chain\">";
+        hops.forEach(function (hop) {
+            html += "<div class=\"atlas-flow-hop" + (/^not /.test(hop[2]) ? " is-missing" : "") + "\">"
+                + "<span class=\"atlas-flow-hop-title\">" + esc(hop[0]) + "</span>"
+                + "<span class=\"atlas-flow-hop-value\">" + esc(hop[2]) + "</span>"
+                + "<span class=\"atlas-flow-hop-src\">" + esc(hop[1]) + "</span></div>";
+        });
+        html += "</div>";
+
+        html += "<div class=\"atlas-flow-basis\">";
+        [flow.wire_basis, flow.tunnel_basis].forEach(function (text) {
+            if (text) html += "<p>" + esc(text) + "</p>";
+        });
+        html += "</div>";
+
+        var statuses = Object.keys(flow.statuses || {});
+        if (statuses.length) {
+            html += "<div class=\"atlas-flow-basis\"><p>The browser recorded: "
+                + statuses.map(function (code) {
+                    return esc(flow.statuses[code]) + " x " + esc(code);
+                }).join(", ") + ".</p></div>";
+        }
+
+        (flow.agent_errors || []).slice(0, 4).forEach(function (line) {
+            html += "<div class=\"atlas-corr-event is-error\">"
+                + "<span class=\"atlas-corr-event-tag\">agent</span><span>" + esc(line) + "</span></div>";
+        });
+        return html;
     }
 
     function renderCorrelation(data) {

@@ -59,6 +59,15 @@ under `[Unreleased]` until one is cut.
 
 ### Changed
 
+- **Correlated flows are presented as a flow table**, the way the capture engine
+  presents its own: same columns, same severity pills, same expand-for-detail,
+  same "Show only problems" and filter - and reusing that engine's classes
+  rather than inventing a second style for the same idea. A reader who has
+  learned one table has learned both. The chain, the join bases and the agent's
+  own error lines moved into the expanded row. Verified on a capture plus
+  bundle: 340 flows, 200 rows shown worst-first, filtering to "msn" leaves 15,
+  the expanded row carries all four hops, and the engine's styling applies
+  natively.
 - **A reload now starts over.** Firefox restores file input selections across a
   reload, the way it restores text typed into a field; Chromium does not, which
   is why the browser harness could not see it. The result was a half-state - the

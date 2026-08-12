@@ -172,6 +172,41 @@ the hit rate is entirely a matter of how the evidence was collected.
 
 ---
 
+## 10. The path stitcher has never met a real device
+
+**Evidence.** `tests/test_path_stitch.py` builds its own captures. That is the
+right way to test the *mechanism* — writing the packets makes the sequence
+numbers exact and known, so a passing test proves the join happened for the
+right reason rather than by luck — but it means every claim about real
+equipment is untested. In particular:
+
+- **Proxy behaviour is assumed.** The code assumes Zproxy, FWaaS, ASAc and the
+  resource connector terminate the connection, and that an FTD forwards it. If
+  any device in a given deployment does something else — a transparent proxy
+  preserving sequence numbers, or a firewall that randomises them — the chain
+  will be built with the wrong kind of hop and will *say* it was proved.
+  This is the failure mode that would matter most, because it turns an
+  inference into a claim.
+- **`_PROXY_WINDOW` is 8 s, chosen not measured.** No sample exists of how long
+  a real Zproxy takes to open its outbound leg under load.
+- **The pivot assumes one address.** A proxy that accepts on a VIP and egresses
+  from a different address falls back to the weaker name-and-time join, which
+  is correct but much less useful. Whether that is the common case in Secure
+  Access is unknown.
+
+**What would fix it.** Captures from two points of one real transaction. Even a
+single pair — client and Zproxy egress — would settle the proxy assumption and
+the timing window at once.
+
+## 11. Device logs are not read
+
+**Evidence.** `POST /atlas/api/path` accepts captures only. FTD and ASAc
+connection events carry the NAT translation and a connection identifier
+*directly*, which is a stronger join than any capture pair can offer, and they
+are usually easier to obtain than a packet capture from a production firewall.
+The formats vary enough that implementing one from memory would produce a
+confident join built on nothing, so none was. Needs one real sample of each.
+
 ## 9. Smaller items
 
 | Item | Evidence | Effort |

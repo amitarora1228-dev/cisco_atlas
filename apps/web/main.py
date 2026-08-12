@@ -302,6 +302,56 @@ async def correlate_session_upload(
         shutil.rmtree(work, ignore_errors=True)
 
 
+@app.post("/atlas/api/path", include_in_schema=False)
+async def stitch_path_upload(files: list[UploadFile] = File(...)) -> JSONResponse:
+    """Follow one transaction across captures taken at several points of the path.
+
+    Each file is a vantage point. The order of the hops is not asked for and
+    not taken from the filenames: it is inferred from the addresses the
+    captures share, because a proxy appears in both the capture before it and
+    the capture after it. A path built from filenames would be a path the
+    operator drew, not one the packets did.
+
+    Uploads are written to a temporary directory and deleted when the request
+    finishes. Captures from several points of a path identify more of an estate
+    than any single one of them does, so none is retained.
+    """
+    import shutil
+    import tempfile
+
+    from atlas_core.flows import extract_wire_flows
+    from atlas_core.path import Vantage, as_payload, stitch_path
+
+    if not files:
+        return JSONResponse({"error": "Supply at least one capture."}, status_code=400)
+
+    work = tempfile.mkdtemp(prefix="atlas-path-")
+    try:
+        vantages: list[Vantage] = []
+        notes: list[str] = []
+        for upload in files:
+            name = os.path.basename(upload.filename or "capture.pcapng")
+            target = os.path.join(work, name)
+            with open(target, "wb") as handle:
+                shutil.copyfileobj(upload.file, handle)
+            try:
+                vantages.append(Vantage(name=name, flows=tuple(extract_wire_flows(target))))
+            except Exception as exc:  # noqa: BLE001 - one bad file must not lose the others
+                notes.append(f"{name} could not be read: {exc}")
+
+        if len(vantages) < 2:
+            notes.append(
+                "A path needs captures from more than one point to be stitched. With a single "
+                "capture only that one vantage point is reported."
+            )
+
+        payload = as_payload(stitch_path(vantages), vantages)
+        payload["notes"] = notes
+        return JSONResponse(payload)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 app.mount("/capture", capture_app)
 app.mount("/bundle", WSGIMiddleware(darthawk_wsgi_app))
 

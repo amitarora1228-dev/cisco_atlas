@@ -139,6 +139,18 @@ class WireFlow:
     has_syn: bool = False
     """Whether the handshake was captured. If not, ``first_seen`` is when the
     capture began rather than when the connection opened."""
+    isn: int | None = None
+    """The client's raw initial sequence number, from the SYN.
+
+    This is the one field that survives a hop unchanged. A router or firewall
+    forwards the sequence number it was given, so the same connection seen at
+    two vantage points carries the same ISN even through NAT, which rewrites
+    addresses and ports but not sequence numbers. A proxy, by contrast,
+    terminates the connection and opens a new one with an ISN of its own -
+    which is how this tool tells forwarding and proxying apart rather than
+    assuming which one a device does."""
+    peer_isn: int | None = None
+    """The server's initial sequence number, from the SYN/ACK."""
     head: tuple[tuple[float, str, int, str, int], ...] = ()
     tail: tuple[tuple[float, str, int, str, int], ...] = ()
     """The opening and closing packets of the connection, as
@@ -360,6 +372,7 @@ _TSHARK_FIELDS = (
     "tcp.flags.fin",
     "tcp.flags.reset",
     "tcp.len",
+    "tcp.seq_raw",
 )
 
 # How many packets of a connection are kept for its ladder, from each end. A
@@ -414,6 +427,7 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             fin,
             rst,
             payload,
+            seq_raw,
         ) = parts[: len(_TSHARK_FIELDS)]
         if not stream or not sport or not dport:
             continue
@@ -459,6 +473,8 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
                 "first": when,
                 "last": when,
                 "anchored": False,
+                "isn": None,
+                "peer_isn": None,
                 "head": [],
                 "tail": deque(maxlen=_PACKET_EDGE),
             }
@@ -483,6 +499,16 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             )
         rec["packets"] += 1
         rec["bytes"] += size
+        if kind == "syn" and rec["isn"] is None and seq_raw:
+            try:
+                rec["isn"] = int(seq_raw)
+            except ValueError:
+                pass
+        elif kind == "synack" and rec["peer_isn"] is None and seq_raw:
+            try:
+                rec["peer_isn"] = int(seq_raw)
+            except ValueError:
+                pass
         event = (moment, src, int(sport), kind, payload_bytes)
         if len(rec["head"]) < _PACKET_EDGE:
             rec["head"].append(event)
@@ -509,6 +535,8 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             first_seen=rec["first"],
             last_seen=rec["last"],
             has_syn=rec["anchored"],
+            isn=rec["isn"],
+            peer_isn=rec["peer_isn"],
             head=tuple(rec["head"]),
             tail=tuple(rec["tail"]),
         )

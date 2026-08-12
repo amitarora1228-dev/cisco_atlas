@@ -1021,3 +1021,84 @@ body.atlas-workspace .layout {
 #drop-bundle {
     position: relative;
 }
+
+/* --- end-to-end path ----------------------------------------------------- */
+/* A forwarded hop and a proxied hop are drawn differently on purpose: one is
+   measured, the other inferred, and a chain that looked uniform would hide
+   which half of the path is which. */
+.atlas-path-input {
+    font: inherit;
+    color: var(--atlas-text, #e6edf3);
+    max-width: 22rem;
+}
+.atlas-path-trace {
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 8px;
+    margin: 0.6rem 0;
+    padding: 0.55rem 0.8rem;
+    background: var(--atlas-surface, #0d1117);
+}
+.atlas-path-trace > summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.atlas-path-dest { font-weight: 600; }
+.atlas-path-badge {
+    font-size: 0.78rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--atlas-border, #30363d);
+    opacity: 0.85;
+}
+.atlas-path-badge.is-complete {
+    border-color: #2ea043;
+    color: #3fb950;
+}
+.atlas-path-chain {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.8rem 0 0.4rem;
+}
+.atlas-path-node {
+    border: 1px solid var(--atlas-border, #30363d);
+    border-radius: 6px;
+    padding: 0.3rem 0.55rem;
+    display: flex;
+    flex-direction: column;
+    min-width: 8rem;
+}
+.atlas-path-node.is-client { border-left: 3px solid #58a6ff; }
+.atlas-path-node.is-proxy { border-left: 3px solid #d29922; }
+.atlas-path-node.is-assumed { border-left: 3px dashed #8b949e; }
+.atlas-path-node.is-server { border-left: 3px solid #3fb950; }
+.atlas-path-node-name { font-family: var(--atlas-mono, monospace); font-size: 0.82rem; }
+.atlas-path-node-sub { font-size: 0.72rem; opacity: 0.7; }
+.atlas-path-hop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 7rem;
+}
+.atlas-path-hop-line {
+    display: block;
+    width: 100%;
+    border-top: 1px solid var(--atlas-border, #30363d);
+}
+.atlas-path-hop-label { font-size: 0.68rem; opacity: 0.65; }
+.atlas-path-basis {
+    font-size: 0.8rem;
+    opacity: 0.85;
+    margin: 0.3rem 0;
+    border-left: 2px solid #2ea043;
+    padding-left: 0.6rem;
+}
+.atlas-path-basis.is-weak { border-left-color: #d29922; }
+.atlas-path-note {
+    font-size: 0.8rem;
+    opacity: 0.75;
+    margin: 0.25rem 0;
+}

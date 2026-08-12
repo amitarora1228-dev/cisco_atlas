@@ -298,6 +298,33 @@ supplying more than one is the reason to correlate, so it should not need a
 second click. Two are enough because the engine states what the missing third
 could not answer rather than refusing to run.
 
+## 4b. End-to-end path (`atlas_core/path.py`)
+
+Joins captures taken at **different points of one path** — client, Zproxy
+egress, FTD, resource — rather than different artefacts from one endpoint. Its
+whole design rests on one distinction:
+
+| Device does | What is shared | Join |
+| --- | --- | --- |
+| **Forwards** (FTD, NAT) | the TCP sequence number, unchanged | exact — and it survives NAT, which rewrites addresses but never sequence numbers |
+| **Proxies** (Zproxy, FWaaS, ASAc, resource connector) | nothing | inferred, from a shared address and a plausible gap in time |
+
+A leg seen at two vantage points is what `proved_hops` counts; a proxied link
+is deliberately excluded from that count, so an inferred chain can never read
+as a measured one.
+
+**Hop order is never asked for.** Where a proxy joins two legs its own address
+is a destination in one capture and a source in the next, and that pivot orders
+the chain. Filenames are ignored on purpose: a path built from them is the path
+the operator drew, not the one the packets took.
+
+**Not yet true:** no device log is read — FTD or ASAc connection events would
+join *more* strongly than a capture pair, carrying the NAT translation and a
+connection ID directly, but their formats vary enough that guessing at one
+would produce a confident join built on nothing. And nothing here has met a
+real device: the four tests build their own captures, which makes the sequence
+numbers exact and known, but proves nothing about a real Zproxy.
+
 It does not switch to the result. Analyze leaves the view exactly where it was:
 the capture, bundle and correlation results are each built into their own panel
 and stay there, and a notice names where the cross-artefact answer will be. The

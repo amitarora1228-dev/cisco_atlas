@@ -20,6 +20,32 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **An end-to-end path view.** Captures taken at several points of a path -
+  client, Zproxy egress, FTD, resource - are stitched into one chain, and the
+  order of the hops is inferred rather than asked for: where a proxy joins two
+  legs, its own address appears as a destination in one capture and a source in
+  the next, and that pivot orders the chain. The view separates two kinds of
+  hop, because only one of them can be proved. A forwarding device passes the
+  TCP sequence number through untouched, so the same connection seen from two
+  vantage points carries the same ISN *even across NAT* - an exact join. A
+  proxy terminates the connection and opens its own, so nothing is shared and
+  the link is reported as inference, with the wording saying that another
+  request for the same name in the same second would look identical.
+  New: `packages/atlas_core/atlas_core/path.py`, `POST /atlas/api/path`, and an
+  "End-to-end path" rail view. `extract_wire_flows` now also reads
+  `tcp.seq_raw`, which is what makes the exact join possible.
+
+  Verified against captures constructed for the purpose, not collected: a
+  three-vantage ZTA chain (client -> Zproxy -> CNHE, with the FTD seeing the
+  second leg NAT'd to a different address and port) produced one transaction,
+  named after the resource rather than the proxy, with the NAT'd leg correctly
+  recognised as one connection seen at two vantage points. Four tests cover the
+  NAT join, the refusal to call a proxied hop proved, the refusal to stitch two
+  unrelated captures together, and the note emitted when a capture holds no
+  handshake. **No real multi-hop capture was available**, so nothing here has
+  been tested against a real Zproxy, FWaaS, ASAc or FTD; device logs are not
+  read at all yet.
+
 - **Each flow says what handled it**, in a fixed order of precedence: ZTA, then
   RA VPN, then Umbrella, then local breakout. The order matters because the
   tests overlap - a flow inside a VPN tunnel still has a real destination, and

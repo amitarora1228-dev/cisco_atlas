@@ -19,6 +19,7 @@
     var CAPTURE = "atlas-engine-capture";
     var BUNDLE = "atlas-engine-bundle";
     var CORRELATE = "atlas-engine-correlate";
+    var PATH = "atlas-engine-path";
 
     /* The bundle engine posts to root-relative paths (/analyze, /inspect-bundle,
      * ...) because standalone it owns the origin. Here it is mounted under
@@ -1670,10 +1671,198 @@
         return view;
     }
 
+    /* ---- end-to-end path ------------------------------------------------- */
+
+    /* One transaction crosses several devices, and only some of them forward
+     * the connection they were given. The chain drawn here therefore mixes two
+     * kinds of hop, and the difference is the whole point of the view: a
+     * forwarded hop is proved by a shared sequence number, a proxied hop is
+     * inferred from a shared address and a plausible gap in time. They are
+     * drawn differently so the reader can see which half of the path is
+     * measurement and which is inference.
+     */
+    function pathNode(label, sub, kind) {
+        var node = el("div", "atlas-path-node" + (kind ? " is-" + kind : ""));
+        node.appendChild(el("span", "atlas-path-node-name", label));
+        if (sub) node.appendChild(el("span", "atlas-path-node-sub", sub));
+        return node;
+    }
+
+    function pathChain(trace) {
+        var chain = el("div", "atlas-path-chain");
+        var links = {};
+        (trace.links || []).forEach(function (link) { links[link.upstream] = link; });
+
+        (trace.segments || []).forEach(function (segment, index) {
+            if (index === 0) {
+                chain.appendChild(pathNode(
+                    segment.src_ip,
+                    "port " + segment.src_port,
+                    "client"
+                ));
+            }
+            var link = links[segment.key];
+            var hop = el("div", "atlas-path-hop");
+            var seen = segment.seen_at > 1
+                ? "seen at " + segment.seen_at + " vantage points"
+                : "seen at " + (segment.vantages[0] || "one capture");
+            hop.appendChild(el("span", "atlas-path-hop-line", ""));
+            hop.appendChild(el(
+                "span",
+                "atlas-path-hop-label",
+                seen + (segment.isn === null ? " - no handshake" : "")
+            ));
+            chain.appendChild(hop);
+            chain.appendChild(pathNode(
+                segment.dst_ip + ":" + segment.dst_port,
+                segment.sni || segment.dst_role,
+                link ? (link.strength === "observed" ? "proxy" : "assumed") : "server"
+            ));
+        });
+        return chain;
+    }
+
+    function pathTrace(trace) {
+        var block = el("details", "atlas-path-trace");
+        var summary = el("summary", null);
+        summary.appendChild(el("span", "atlas-path-dest", trace.destination));
+        summary.appendChild(el(
+            "span",
+            "atlas-path-badge" + (trace.complete ? " is-complete" : ""),
+            trace.segments.length + " leg(s), " + trace.proved_hops + " proved"
+        ));
+        block.appendChild(summary);
+        block.appendChild(pathChain(trace));
+
+        (trace.links || []).forEach(function (link) {
+            var basis = el("p", "atlas-path-basis" + (
+                link.strength === "observed" ? "" : " is-weak"
+            ));
+            basis.textContent = link.basis;
+            block.appendChild(basis);
+        });
+        (trace.notes || []).forEach(function (note) {
+            block.appendChild(el("p", "atlas-path-note", note));
+        });
+        return block;
+    }
+
+    function renderPath(data) {
+        var host = document.getElementById("atlas-path-results");
+        if (!host) return;
+        host.innerHTML = "";
+
+        var vantages = el("div", "atlas-corr-summary");
+        (data.vantages || []).forEach(function (v) {
+            var cell = el("div", "atlas-corr-stat");
+            cell.appendChild(el("span", "atlas-corr-stat-value", String(v.flows)));
+            cell.appendChild(el("span", "atlas-corr-stat-label",
+                v.name + " (" + v.with_handshake + " with a handshake)"));
+            vantages.appendChild(cell);
+        });
+        host.appendChild(vantages);
+
+        var traces = (data.traces || []).filter(function (t) {
+            return t.segments && t.segments.length;
+        });
+        if (!traces.length) {
+            host.appendChild(el("p", "atlas-corr-blurb",
+                "No transaction was found in these captures."));
+        }
+        traces.slice(0, 60).forEach(function (trace) {
+            host.appendChild(pathTrace(trace));
+        });
+
+        if ((data.notes || []).length) {
+            var notes = el("div", "atlas-corr-block");
+            notes.appendChild(el("h3", null, "What these captures could not answer"));
+            data.notes.forEach(function (note) {
+                notes.appendChild(el("p", "atlas-path-note", note));
+            });
+            host.appendChild(notes);
+        }
+    }
+
+    function runPath(input, button, status) {
+        var files = input.files ? Array.prototype.slice.call(input.files) : [];
+        if (!files.length) {
+            status.textContent = "Add the captures taken along the path first.";
+            return;
+        }
+        var form = new FormData();
+        files.forEach(function (file) { form.append("files", file); });
+
+        button.disabled = true;
+        status.textContent = "Stitching " + files.length + " capture(s)...";
+
+        fetch("/atlas/api/path", { method: "POST", body: form })
+            .then(function (response) {
+                return response.json().then(function (data) {
+                    if (!response.ok) throw new Error(data.error || "The path could not be built.");
+                    return data;
+                });
+            })
+            .then(function (data) {
+                var proved = (data.traces || []).reduce(function (n, t) {
+                    return n + (t.proved_hops || 0);
+                }, 0);
+                status.textContent = (data.traces || []).length + " transaction(s), "
+                    + proved + " hop(s) proved by sequence number";
+                renderPath(data);
+            })
+            .catch(function (err) {
+                status.textContent = err.message || "The path could not be built.";
+            })
+            .then(function () { button.disabled = false; });
+    }
+
+    function buildPathView() {
+        var view = el("div", "atlas-engine atlas-corr");
+        view.id = PATH;
+
+        var head = el("header", "atlas-corr-head");
+        head.appendChild(el("h2", null, "End-to-end path"));
+        head.appendChild(el(
+            "p",
+            null,
+            "A request to a private resource is not one connection but a chain of "
+                + "them, and the devices along the way do two different things to it. "
+                + "A firewall forwards the connection, so the same packet appears in "
+                + "two captures and the hop can be proved. A proxy - Zproxy, FWaaS, "
+                + "ASAc, a resource connector - terminates the connection and opens "
+                + "its own, so nothing is shared and the hop can only be inferred. "
+                + "Add a capture from each point you have one from; the order of the "
+                + "hops is worked out from the addresses the captures share, not from "
+                + "the order you upload them."
+        ));
+        view.appendChild(head);
+
+        var bar = el("div", "atlas-corr-bar");
+        var input = el("input", "atlas-path-input");
+        input.type = "file";
+        input.multiple = true;
+        input.accept = ".pcap,.pcapng,.cap";
+        var button = el("button", "atlas-corr-run", "Build the path");
+        button.type = "button";
+        var status = el("span", "atlas-corr-status");
+        status.setAttribute("role", "status");
+        button.addEventListener("click", function () { runPath(input, button, status); });
+        bar.appendChild(input);
+        bar.appendChild(button);
+        bar.appendChild(status);
+        view.appendChild(bar);
+
+        var results = el("div", null);
+        results.id = "atlas-path-results";
+        view.appendChild(results);
+        return view;
+    }
+
     /* ---- navigation ------------------------------------------------------ */
 
+
     function showEngine(which) {
-        [CAPTURE, BUNDLE, CORRELATE].forEach(function (id) {
+        [CAPTURE, BUNDLE, CORRELATE, PATH].forEach(function (id) {
             var node = document.getElementById(id);
             if (node) node.classList.toggle("is-active", id === which);
         });
@@ -1794,6 +1983,25 @@
         });
         rail.appendChild(corrBtn);
 
+        var pathBtn = el("button", "atlas-rail-item");
+        pathBtn.type = "button";
+        var pathIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        pathIcon.setAttribute("viewBox", "0 0 24 24");
+        pathIcon.setAttribute("fill", "none");
+        pathIcon.setAttribute("stroke", "currentColor");
+        pathIcon.setAttribute("stroke-width", "1.6");
+        pathIcon.setAttribute("stroke-linecap", "round");
+        pathIcon.innerHTML = '<circle cx="4" cy="12" r="2"/><circle cx="12" cy="12" r="2"/>'
+            + '<circle cx="20" cy="12" r="2"/><path d="M6 12h4M14 12h4"/>';
+        pathBtn.appendChild(pathIcon);
+        pathBtn.appendChild(el("span", null, "End-to-end path"));
+        pathBtn.dataset.engine = PATH;
+        pathBtn.addEventListener("click", function () {
+            setSummaryMode(false);
+            showEngine(PATH);
+        });
+        rail.appendChild(pathBtn);
+
         rail.addEventListener("click", function (e) {
             var item = e.target.closest(".atlas-rail-item");
             if (item) markActive(item);
@@ -1834,6 +2042,7 @@
             if (node) main.appendChild(node);
         });
         main.appendChild(buildCorrelateView());
+        main.appendChild(buildPathView());
         layout.appendChild(main);
         document.body.appendChild(layout);
 

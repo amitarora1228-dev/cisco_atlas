@@ -818,6 +818,148 @@ button.ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 .int-tag { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 6px;
   font-size: 10px; font-weight: 700; letter-spacing: .3px; background: #eef1f6; color: #51607a; border: 1px solid #d3dbe8; }
 
+/* Connection story — the ladder read as a narrative: each protocol layer in the
+   order it had to succeed, its own verdict, and which one actually failed.
+
+   Colour carries two independent meanings and they must not be confused:
+   the LAYER badge colour is identity (which protocol), the STATUS pill colour
+   is the verdict (did it work). A reader can therefore scan down the left edge
+   for structure and down the right edge for trouble. */
+/* The detail pane is a two-column grid. The story is the narrative for the whole
+   connection, not one more property block, so it takes the full width - which is
+   also what lets its measurements sit two-up instead of in a single long column. */
+.story-block { margin-bottom: 16px; grid-column: 1 / -1; }
+
+/* Layer identity palette. */
+.lyr-dns    { --lyr: #7c5cbf; --lyr-soft: #f3eefc; }
+.lyr-tcp    { --lyr: #3e84e5; --lyr-soft: #eaf2fd; }
+.lyr-tunnel { --lyr: #c47d04; --lyr-soft: #fdf3e1; }
+.lyr-tls    { --lyr: #1f8a5b; --lyr-soft: #e6f6ec; }
+.lyr-http   { --lyr: #0f7b8a; --lyr-soft: #e4f4f6; }
+.lyr-data   { --lyr: #5a6b86; --lyr-soft: #eef1f6; }
+
+.st-verdict { display: inline-block; padding: 6px 14px; border-radius: 7px;
+  font-size: 13px; font-weight: 600; margin: 2px 0 14px; }
+.st-verdict b { font-weight: 800; }
+.st-verdict-fail { background: #fdeceb; color: #a8302a; border: 1px solid #f3c2bf; }
+.st-verdict-ok { background: #e6f6ec; color: #17724a; border: 1px solid #b6e2c8; }
+
+.st-i { width: 14px; height: 14px; flex: none; vertical-align: -2px; }
+
+/* Endpoints. Icons anchor each end so the direction of the story is obvious
+   before a single line is read. */
+.st-ends { display: flex; align-items: center; gap: 14px; max-width: 860px;
+  padding: 12px 16px; margin-bottom: 12px; border-radius: 10px;
+  background: #fff; border: 1px solid var(--border); }
+.st-end { display: flex; align-items: center; gap: 11px; }
+.st-epic { width: 32px; height: 32px; border-radius: 8px; flex: none;
+  display: grid; place-items: center; background: #eef4fd; color: #2a63c7;
+  border: 1px solid #d5e3f8; }
+.st-epic .st-i { width: 16px; height: 16px; }
+.st-role { display: block; font-size: 13px; font-weight: 750; color: #1f2937;
+  line-height: 1.2; }
+.st-end .st-addr { display: block; font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.st-end .st-addr b { color: #374151; font-weight: 700; }
+.st-end.st-right { margin-left: auto; text-align: right; }
+.st-swap { color: #9aa4b4; display: grid; place-items: center; }
+.st-swap .st-i { width: 20px; height: 20px; }
+
+/* One layer block. */
+.st-layer { max-width: 860px; margin: 10px 0; padding: 12px 16px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.st-layer.st-fail { background: #fffbfb; border-color: #f0cbc8; }
+.st-head { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.st-ic { width: 26px; height: 26px; border-radius: 7px; flex: none;
+  display: grid; place-items: center;
+  background: var(--lyr-soft, #eef1f6); color: var(--lyr, #4b5563);
+  border: 1px solid color-mix(in srgb, var(--lyr, #9aa4b4) 26%, transparent); }
+.st-badge { font-size: 13px; font-weight: 800; letter-spacing: .04em;
+  color: var(--lyr, #4b5563); }
+.st-rule { flex: 1; height: 1px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--lyr, #9aa4b4) 28%, transparent), transparent); }
+
+/* Verdict pill: white ground with a coloured mark, so a healthy layer is
+   readable rather than shouting. */
+.st-pill { font-size: 11.5px; font-weight: 650; padding: 4px 11px; border-radius: 999px;
+  white-space: nowrap; background: #fff; border: 1px solid var(--border); color: #45526b; }
+.st-pill b { font-weight: 800; margin-right: 3px; }
+.st-pill-ok { border-color: #bfe3cd; color: #17724a; }
+.st-pill-ok b { color: #1f9d57; }
+.st-pill-fail { border-color: #f3c2bf; color: #b3231d; background: #fdeceb; }
+.st-pill-warn, .st-pill-absent { border-color: #eccf94; color: #8a5a03; background: #fdf3e1; }
+
+.st-steps { padding-left: 2px; }
+.st-step { display: grid; grid-template-columns: 26px 1fr; align-items: baseline;
+  padding: 3px 0; line-height: 1.55; border-radius: 5px; }
+.st-arrow { text-align: center; font-size: 13px; font-weight: 700;
+  font-family: var(--mono, ui-monospace, monospace); }
+.dir-out .st-arrow { color: #3e84e5; }
+.dir-in .st-arrow { color: #1f8a5b; }
+.st-msg { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px;
+  font-weight: 700; color: #1f2937; }
+.st-dim { color: var(--muted); font-weight: 400; }
+.st-ok { color: #17724a; }
+.st-note { font-family: inherit; font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.st-pkt { font-family: var(--mono, ui-monospace, monospace); font-size: 10px;
+  color: #aeb6c0; margin-left: 7px; font-weight: 400; }
+.st-step.st-bad { background: #fdeceb; padding: 7px 10px 7px 0; margin: 4px 0;
+  box-shadow: inset 3px 0 0 #d8362f; }
+.st-step.st-bad .st-msg, .st-step.st-bad .st-arrow { color: #b3231d; }
+.st-step.st-bad .st-note { color: #a8433d; }
+.st-why { display: flex; gap: 8px; align-items: flex-start; font-size: 12px;
+  color: #8a5a03; background: #fdf3e1; border-radius: 7px; padding: 8px 11px;
+  margin: 9px 0 0; border: 1px solid #f0dcb0; }
+.st-why .st-i { margin-top: 2px; }
+
+/* Measurements in two columns: the labels are short and the values narrow, so a
+   single column wasted the width and pushed the conclusion off-screen. */
+.st-facts { margin: 11px 0 0; padding-top: 10px; border-top: 1px solid #eef1f5;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 3px 26px; }
+.st-fact { display: grid; grid-template-columns: 178px 1fr; align-items: baseline;
+  gap: 10px; font-size: 12px; line-height: 1.55; padding: 2px 0; }
+.st-fk { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.st-fk .st-i { color: #9aa4b4; }
+.st-fv { font-family: var(--mono, ui-monospace, monospace); color: #1f2937;
+  font-weight: 700; background: #f1f4f8; border-radius: 5px; padding: 1px 7px;
+  justify-self: start; }
+.st-fn { grid-column: 2; color: #8a5a03; font-style: italic; font-size: 11.5px;
+  padding-bottom: 3px; }
+.st-fact.tone-warn .st-fv { color: #8a5a03; background: #fdf3e1; }
+.st-fact.tone-bad .st-fv { color: #b3231d; background: #fdeceb; }
+.st-fact.tone-bad .st-fn { color: #a8433d; }
+.st-fact.tone-plain .st-fn { color: var(--muted); }
+
+/* A layer that is pure measurement reads as a strip, not a list. */
+.st-facts-strip { display: flex; flex-wrap: wrap; gap: 0; }
+.st-facts-strip .st-fact { display: flex; align-items: center; gap: 9px;
+  padding: 2px 22px 2px 0; margin-right: 22px; border-right: 1px solid #eef1f5; }
+.st-facts-strip .st-fact:last-child { border-right: 0; margin-right: 0; }
+.st-facts-strip .st-fk { flex-direction: column; align-items: flex-start; gap: 2px;
+  font-size: 11.5px; }
+.st-facts-strip .st-fn { display: none; }
+
+.st-concl { max-width: 860px; margin-top: 16px; padding: 14px 18px;
+  border: 1px solid #cddcf3; border-left: 4px solid var(--accent, #3e84e5);
+  border-radius: 10px; background: linear-gradient(180deg, #f7faff, #fdfdff); }
+.st-concl h5 { margin: 0 0 8px; font-size: 13px; color: #1f2937; font-weight: 800; }
+.st-concl p { margin: 0 0 9px; font-size: 12.5px; color: #45526b; line-height: 1.6; }
+.st-concl p:last-child { margin-bottom: 0; }
+.st-fix { color: #1f2937 !important; background: #eaf2fd; border-radius: 6px;
+  padding: 8px 11px; border: 1px solid #cddcf3; }
+.st-fixk { color: #fff; background: var(--accent, #3e84e5); font-weight: 800;
+  font-size: 10px; letter-spacing: .08em; margin-right: 9px; padding: 2px 7px;
+  border-radius: 4px; }
+
+.st-concl { max-width: 760px; margin-top: 14px; padding: 12px 16px;
+  border: 1px solid var(--border); border-radius: 8px; background: #fbfcfe; }
+.st-concl h5 { margin: 0 0 7px; font-size: 12.5px; color: #2a3648; }
+.st-concl p { margin: 0 0 8px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.st-concl p:last-child { margin-bottom: 0; }
+.st-fix { color: #2a3648 !important; }
+.st-fixk { color: #2a63c7; font-weight: 700; font-size: 10.5px; letter-spacing: .07em; margin-right: 8px; }
+
 /* Connection ladder — a sequence diagram of one connection: client owns the
    LEFT lifeline, server the RIGHT, each packet is an arrow that crosses between
    them in its real direction (-> client->server, <- server->client). */

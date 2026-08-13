@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .analyze import AnalysisResult
+from .certs import evaluate_at
 from .engine import FlowReport
 
 BAR = "=" * 54
@@ -38,10 +39,13 @@ def _flow_block(fr: FlowReport) -> str:
         issuer = cert.issuer_cn or cert.issuer_org or "?"
         ca_kind = "PROXY/corporate CA" if cert.looks_like_proxy_ca else (
             "public CA" if cert.looks_like_public_ca else "unknown CA")
+        window = evaluate_at(cert, f.packets[0].time_epoch if f.packets else None)
+        state = {"expired": " | EXPIRED WHEN CAPTURED",
+                 "not_yet_valid": " | NOT YET VALID WHEN CAPTURED"}.get(window.status, "")
         lines.append(
             f"- Certificate:      subject={cert.subject_cn or '?'} | issuer={issuer} "
-            f"({ca_kind}) | valid {cert.not_before}→{cert.not_after}"
-            + (" | EXPIRED" if cert.expired else "")
+            f"({ca_kind}) | valid {cert.not_before}\u2192{cert.not_after}"
+            + state
         )
         if cert.san_dns:
             lines.append(f"                    SAN: {', '.join(cert.san_dns[:8])}"

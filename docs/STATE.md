@@ -5,7 +5,7 @@ finish.** It is the one place that says what exists, where each thing stands, an
 what is known to be broken. If it disagrees with any other document, this file is
 right and the other one is stale.
 
-**Last updated:** 2026-08-11 · branch `main` · head `452ca7e` (snapshot-led bundle results, one view at a time)
+**Last updated:** 2026-08-14 · branch `main` · head `7f20a1a`+ (connection story; certificate validity judged at capture time; opaque-tunnel finding)
 
 ---
 
@@ -209,6 +209,9 @@ fallback, but PATH is the supported arrangement.
 | Run-everything bundle analysis, single upload | **Done** |
 | Run-everything results view (summary mode) | **Done** — see below |
 | Rename to ATLAS (user-facing) | **Done** |
+| Per-connection story (DNS/TCP/TUNNEL/TLS/HTTP/DATA with verdicts) | **Done** — replaces the packet ladder as the primary view |
+| Certificate validity judged at capture time | **Done** — single `evaluate_at` in `certs.py`, 16 false findings removed |
+| Reporting a fault whose cause is encrypted | **Done** — opaque-tunnel finding; states the pattern, never a cause |
 | Identity join (org ID) in `atlas_core` | **Done**, unproven against a real bundle |
 | Flow-level correlation (bundle + capture + HAR) | **Done** — see below. Proven against a real three-artefact session |
 | Time alignment between log and packet clocks | **Done for connections whose handshake was captured** — derived, reported as an upper bound, never silently applied |
@@ -364,20 +367,31 @@ Ordered by how likely they are to bite.
    They are accepted and return only a payload-received line; the route still
    carries a placeholder where the parsing would go. Only **ZTA** and **Duo
    Desktop** do real work. They are excluded from run-everything for that reason.
-4. **Tailwind loads from a CDN at runtime** (`cdn.tailwindcss.com`), which
+4. **Nothing inside a CONNECT tunnel can be read without a key log.** The status
+   code, the error and the payload are encrypted, so rejection by the
+   destination, throttling by the intermediary and the client giving up are
+   indistinguishable. The opaque-tunnel finding reports the pattern and says so
+   rather than guessing; a capture supplied with `SSLKEYLOGFILE` removes the
+   blind spot entirely.
+5. **The connection story cannot say why, only when.** It reports sequence and
+   measurement. Where the evidence supports a motive it says so and marks the
+   basis; where it does not, it says that too. Do not add wording that turns a
+   correlation into a cause - that mistake has already been made and cost 51 of
+   55 flows being blamed on the wrong party.
+6. **Tailwind loads from a CDN at runtime** (`cdn.tailwindcss.com`), which
    Tailwind itself warns is not for production, and which is a network dependency
    at page load. Preflight is disabled; a scoped compatibility layer in the bundle
    engine's CSS restores what its markup relied on.
-5. **Three font families load from Google** (Inter; Orbitron and Rajdhani).
+7. **Three font families load from Google** (Inter; Orbitron and Rajdhani).
    Typography is the largest remaining visual divergence.
-6. **`network_info` is not registered** in the capture engine's
+8. **`network_info` is not registered** in the capture engine's
    `CLASSIFICATION_*` tables, so its findings are computed, returned by the API,
    and never rendered.
-7. **`_regress_baseline.json` is stale.**
-8. **The UI surface guard has a blind spot**: it records ids, control names,
-   radio values, select options and button labels. An element with no id that is
-   not a form control - the user badge, for instance - can vanish without failing
-   a test.
+9. **`_regress_baseline.json` is stale.**
+10. **The UI surface guard has a blind spot**: it records ids, control names,
+    radio values, select options and button labels. An element with no id that is
+    not a form control - the user badge, for instance - can vanish without failing
+    a test.
 9. **Analysing a capture and a bundle together is slow, and looks hung.** Both
    analyses are CPU-bound Python in one server process, so they serialise. The
    YouTube capture alone finishes in about 6 s; alongside a full bundle analysis
@@ -440,6 +454,29 @@ Two things to know before touching this:
 
 Every one of these was a real failure here, not a hypothetical.
 
+- **Judge a certificate against the traffic, never against `now()`.** Comparing
+  `not_after` with the time of analysis answers a different question, and every
+  capture eventually ages past the certificates inside it. All 16 expiry
+  findings across the two test captures were wrong this way, one of them at
+  `high` severity for a certificate that had three days left when the packets
+  were sent. `certs.evaluate_at(cert, when)` is the only place that decides
+  this; `CertInfo.expired` was removed so the trap cannot be re-entered.
+- **Do not threshold "expiring soon" without knowing the issuing policy.** An
+  interception proxy mints five-day certificates, so "one day left" is that
+  design working. A 14-day rule flagged 14 such certificates and was wrong every
+  time.
+- **A finding about several flows must mark every one of them.** `has_problem`
+  is computed only from a flow's own findings, so a capture-level finding left
+  all 121 flows looking healthy and an "errors only" view showed nothing.
+- **Raw counters can outlive the findings they belong to.** Retransmission and
+  reordering counts stay on the flow after the analyzer has correctly suppressed
+  the *findings* for them as capture artefacts. Anything printing those counters
+  - the error column did - must lead with the diagnosis instead.
+- **A duplicated capture doubles what looks like loss.** The same traffic
+  recorded on three interfaces produced 2,158 "retransmissions" out of 6,872
+  packets; the real figure, counting repeats within one interface and only on
+  data segments, was **2**. Deduplicate by `(seq, ack, len, src)` before
+  measuring anything directional.
 - **A global control's panel must not live inside an engine.** Read Me, Feedback
   and the `?` popover are reached from the shared header but were owned by one
   engine, so opening them from any other view un-hid a panel inside a

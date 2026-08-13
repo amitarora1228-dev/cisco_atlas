@@ -1328,6 +1328,7 @@ function flowDetail(f) {
       ${kv("ACKed-but-unseen segments", f.ack_lost_segment || null)}
       ${f.pkts_c2s != null && (f.pkts_c2s || f.pkts_s2c) ? kv("Direction", "client\u2192server " + f.pkts_c2s + " pkts / " + (f.bytes_c2s || 0) + "B \u00b7 server\u2192client " + f.pkts_s2c + " pkts / " + (f.bytes_s2c || 0) + "B") : ""}
     </div>
+    ${connectionStory(f)}
     ${connectionLadder(f)}
     ${mtuBlock(f)}
     ${findings ? `<div class="detail-findings"><h4 style="color:var(--accent);text-transform:uppercase;font-size:12px">Findings</h4>${findings}</div>` : ""}
@@ -1367,12 +1368,153 @@ function mtuBlock(f) {
   </div>`;
 }
 
+// Icons for the connection story. Stroke-based so they inherit currentColor and
+// stay legible at 14px; the layer badge and each measurement get one so the eye
+// can travel down a column of shapes instead of reading every label.
+const ST_ICON = {
+  shield: '<path d="M8 1.5 2.5 4v4c0 3 2.3 5.6 5.5 6.5 3.2-.9 5.5-3.5 5.5-6.5V4L8 1.5Z"/>',
+  lock: '<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+  globe: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.7 2 1.7 10 0 12M8 2C6.3 4 6.3 12 8 14"/>',
+  doc: '<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>',
+  clock: '<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>',
+  pulse: '<path d="M1.5 8h3l2-4.5L9.5 12l2-4h3"/>',
+  hops: '<circle cx="3" cy="8" r="1.6"/><circle cx="13" cy="8" r="1.6"/><path d="M4.6 8h6.8"/>',
+  flag: '<path d="M4 14V2.5M4 3h7l-1.5 2.5L11 8H4"/>',
+  swap: '<path d="M2 6h9l-2.5-2.5M14 10H5l2.5 2.5"/>',
+  gauge: '<path d="M2.5 12a6 6 0 1 1 11 0"/><path d="M8 12 11 7"/>',
+  stack: '<path d="M8 2 2 5l6 3 6-3-6-3Z"/><path d="M2 9l6 3 6-3"/>',
+  key: '<circle cx="5" cy="11" r="2.5"/><path d="M6.8 9.2 13 3M11 5l1.5 1.5"/>',
+  cert: '<rect x="2.5" y="3" width="11" height="8" rx="1"/><path d="M6 13.5h4M8 11v2.5"/>',
+  finger: '<path d="M4 9c0-2.2 1.8-4 4-4s4 1.8 4 4M6 10.5c0-1.1.9-2 2-2s2 .9 2 2M8 12.5v-1"/>',
+  server: '<rect x="2.5" y="3" width="11" height="4" rx="1"/><rect x="2.5" y="9" width="11" height="4" rx="1"/>',
+  link: '<path d="M6.5 9.5a3 3 0 0 1 0-4l1-1a3 3 0 0 1 4 4l-.5.5M9.5 6.5a3 3 0 0 1 0 4l-1 1a3 3 0 0 1-4-4l.5-.5"/>',
+  alert: '<path d="M8 2 1.5 13.5h13z"/><path d="M8 6.5v3M8 11.5v.5"/>',
+  device: '<rect x="2" y="3" width="12" height="8" rx="1"/><path d="M5 13.5h6"/>',
+  arrows: '<path d="M5 2v12M5 14l-2.5-2.5M11 14V2M11 2l2.5 2.5"/>',
+};
+
+function stIcon(name, cls) {
+  return `<svg class="st-i ${cls || ""}" viewBox="0 0 16 16" fill="none"
+    stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+    stroke-linejoin="round" aria-hidden="true">${ST_ICON[name] || ST_ICON.doc}</svg>`;
+}
+
+const ST_LAYER_ICON = { DNS: "globe", TCP: "shield", TUNNEL: "lock", TLS: "shield",
+  HTTP: "globe", DATA: "stack" };
+
+// Chosen from the label so the backend stays free of presentation concerns.
+function stFactIcon(label) {
+  const l = (label || "").toLowerCase();
+  if (l.includes("round trip") && l.includes("variation")) return "pulse";
+  if (l.includes("round trip") || l.includes("setup") || l.includes("open for")) return "clock";
+  if (l.includes("distance")) return "hops";
+  if (l.includes("closed")) return "flag";
+  if (l.includes("transferred")) return "arrows";
+  if (l.includes("rate")) return "gauge";
+  if (l.includes("segment")) return "stack";
+  if (l.includes("cipher") || l.includes("key exchange")) return "key";
+  if (l.includes("certificate") || l.includes("issued")) return "cert";
+  if (l.includes("ja3")) return "finger";
+  if (l.includes("resolver") || l.includes("proxy") || l.includes("terminated")) return "server";
+  if (l.includes("cname") || l.includes("leg") || l.includes("inner")) return "link";
+  if (l.includes("retransmit") || l.includes("stall") || l.includes("lost")
+      || l.includes("window") || l.includes("mss") || l.includes("largest")
+      || l.includes("encrypted client")) return "alert";
+  if (l.includes("host") || l.includes("address")) return "globe";
+  return "doc";
+}
+
+// Render the connection as a story: each protocol layer in the order it had to
+// succeed, with its own verdict, and a conclusion that says which layer failed.
+// The ladder below it stays the packet-by-packet record; this is the reading of
+// it. Every step shows the frame number it came from so it can be checked in
+// Wireshark.
+function connectionStory(f) {
+  const s = f.story;
+  if (!s || !s.layers || !s.layers.length) return "";
+
+  const layers = s.layers.map((L) => {
+    const steps = (L.steps || []).map((st) => {
+      const arrow = st.dir === "c2s" ? "\u2192" : "\u2190";
+      const detail = st.detail ? ` <span class="st-dim">${esc(st.detail)}</span>` : "";
+      const token = st.ok_token ? ` <span class="st-ok">${esc(st.ok_token)}</span>` : "";
+      const note = st.note ? ` <span class="st-note">\u2014 ${esc(st.note)}</span>` : "";
+      const pkt = st.pkt ? `<span class="st-pkt">#${st.pkt}</span>` : "";
+      return `<div class="st-step dir-${st.dir === "c2s" ? "out" : "in"}${st.bad ? " st-bad" : ""}">
+        <span class="st-arrow">${arrow}</span>
+        <span class="st-msg">${esc(st.msg)}${detail}${token}${note}${pkt}</span>
+      </div>`;
+    }).join("");
+    const mark = L.status === "ok" ? "\u2713" : L.status === "fail" ? "\u2715" : "!";
+    const why = L.why ? `<div class="st-why">${stIcon("alert")}<span>${esc(L.why)}</span></div>` : "";
+    const facts = (L.facts || []).map((ft) => `<div class="st-fact tone-${esc(ft.tone || "plain")}">
+        <span class="st-fk">${stIcon(stFactIcon(ft.label))}${esc(ft.label)}</span>
+        <span class="st-fv">${esc(ft.value)}</span>
+        ${ft.note ? `<span class="st-fn">${esc(ft.note)}</span>` : ""}
+      </div>`).join("");
+    // Measurements with no narrative read better as a strip than as a column.
+    const factClass = L.name === "DATA" ? "st-facts st-facts-strip" : "st-facts";
+    return `<div class="st-layer st-${esc(L.status)} lyr-${esc((L.name || "").toLowerCase())}">
+      <div class="st-head">
+        <span class="st-ic">${stIcon(ST_LAYER_ICON[L.name] || "doc")}</span>
+        <span class="st-badge">${esc(L.name)}</span>
+        <span class="st-rule"></span>
+        <span class="st-pill st-pill-${esc(L.status)}"><b>${mark}</b> ${esc(L.summary || "")}</span>
+      </div>
+      ${steps ? `<div class="st-steps">${steps}</div>` : ""}
+      ${why}
+      ${facts ? `<div class="${factClass}">${facts}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  const c = s.conclusion || {};
+  const paras = (c.paragraphs || []).map((p) => `<p>${esc(p)}</p>`).join("");
+  const fix = c.fix ? `<p class="st-fix"><span class="st-fixk">FIX</span>${esc(c.fix)}</p>` : "";
+  const conclusion = (paras || fix)
+    ? `<div class="st-concl"><h5>\u2691 Conclusion</h5>${paras}${fix}</div>` : "";
+
+  const host = s.server && s.server.host ? esc(s.server.host) : "";
+  const saddr = esc((s.server && s.server.addr) || "server");
+  const verdict = s.layers.find((L) => L.status === "fail");
+  const banner = verdict
+    ? `<div class="st-verdict st-verdict-fail">Failed at <b>${esc(verdict.name)}</b> \u2014 ${esc(verdict.summary || "")}</div>`
+    : `<div class="st-verdict st-verdict-ok">Completed \u2014 no layer failed</div>`;
+  return `<div class="detail-block story-block">
+    <h4>What happened, in order</h4>
+    ${banner}
+    <div class="st-ends">
+      <div class="st-end">
+        <span class="st-epic">${stIcon("device")}</span>
+        <span>
+          <span class="st-role">Client</span>
+          <span class="st-addr">${esc((s.client && s.client.addr) || "client")}</span>
+        </span>
+      </div>
+      <div class="st-swap">${stIcon("swap")}</div>
+      <div class="st-end st-right">
+        <span>
+          <span class="st-role">Server</span>
+          <span class="st-addr">${host ? `<b>${host}</b> \u00b7 ` : ""}${saddr}</span>
+        </span>
+        <span class="st-epic">${stIcon("server")}</span>
+      </div>
+    </div>
+    ${layers}
+    ${conclusion}
+  </div>`;
+}
+
+// The packet ladder is superseded by the connection story, which reads the same
+// events. Set to true to bring the raw sequence diagram back.
+const SHOW_PACKET_LADDER = false;
+
 // Render the left<->right packet ladder of a single connection as a sequence
 // diagram: the client owns the LEFT lifeline, the server the RIGHT one, and each
 // packet is an arrow that crosses between them in its real direction (client->
 // server points right, server->client points left). The arrow draws itself from
 // sender to receiver, so the motion itself encodes who sent what, in order.
 function connectionLadder(f) {
+  if (!SHOW_PACKET_LADDER) return "";
   const tl = f.timeline;
   if (!tl || !tl.events || !tl.events.length) return "";
   const client = esc(f.src || "client");
@@ -1418,14 +1560,14 @@ function connectionLadder(f) {
       <div class="lad-chain-foot">Correlated by hostname + time, not cryptographic proof.</div>
     </div>`;
   }
-  return `<div class="detail-block ladder-block">
-    <h4>Connection flow <span class="lad-note">(${note})</span></h4>
+  return `<details class="detail-block ladder-block">
+    <summary>Packet-by-packet record <span class="lad-note">(${note})</span></summary>
     ${chain}
     <div class="ladder">
       <div class="lad-head"><span class="lad-ep lad-ep-c">${client}</span><span class="lad-ep lad-ep-s">${server}</span></div>
       <div class="lad-body">${rows}</div>
     </div>
-  </div>`;
+  </details>`;
 }
 
 function harDetail(h) {

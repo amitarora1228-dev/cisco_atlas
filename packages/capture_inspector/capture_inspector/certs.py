@@ -63,8 +63,6 @@ class CertInfo:
     is_self_signed: bool = False
     serial: Optional[str] = None
     sig_algo: Optional[str] = None
-    expired: bool = False
-    not_yet_valid: bool = False
     looks_like_proxy_ca: bool = False
     looks_like_public_ca: bool = False
     ski: Optional[str] = None
@@ -72,6 +70,50 @@ class CertInfo:
     is_secure_access: bool = False        # issued by / part of Cisco Secure Access PKI
     is_secure_access_root: bool = False   # this cert IS the Secure Access Root CA
     parse_error: Optional[str] = None
+
+
+@dataclass
+class CertWindow:
+    """Where a certificate sat in its validity window at one moment in time."""
+    status: str                       # valid | expired | not_yet_valid | unknown
+    not_before: datetime | None = None
+    not_after: datetime | None = None
+    at: datetime | None = None
+    days_outside: int = 0             # days past expiry, or days before it started
+    lifetime_days: int | None = None
+
+    @property
+    def is_problem(self) -> bool:
+        return self.status in ("expired", "not_yet_valid")
+
+
+def _parse_stamp(value: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def evaluate_at(cert: CertInfo, when_epoch: float | None) -> CertWindow:
+    """Judge a certificate at the moment it was actually presented.
+
+    This is the only place that decides whether a certificate was expired, and it
+    always needs a moment to judge against. Comparing against "now" is a
+    different question: every capture eventually ages past the certificates in
+    it, so an analysis-time check turns healthy old captures into certificate
+    incidents. Pass the timestamp of the traffic being explained.
+    """
+    starts, ends = _parse_stamp(cert.not_before), _parse_stamp(cert.not_after)
+    lifetime = (ends - starts).days if (starts and ends) else None
+    if ends is None or when_epoch is None:
+        return CertWindow("unknown", starts, ends, None, 0, lifetime)
+
+    at = datetime.fromtimestamp(when_epoch, timezone.utc)
+    if at > ends:
+        return CertWindow("expired", starts, ends, at, (at - ends).days, lifetime)
+    if starts and at < starts:
+        return CertWindow("not_yet_valid", starts, ends, at, (starts - at).days, lifetime)
+    return CertWindow("valid", starts, ends, at, 0, lifetime)
 
 
 def _name_attr(name: x509.Name, oid) -> Optional[str]:
@@ -116,9 +158,6 @@ def parse_cert_hex(cert_hex: str) -> CertInfo:
         na = cert.not_valid_after.replace(tzinfo=timezone.utc)
     info.not_before = nb.isoformat()
     info.not_after = na.isoformat()
-    now = datetime.now(timezone.utc)
-    info.expired = na < now
-    info.not_yet_valid = nb > now
 
     try:
         bc = cert.extensions.get_extension_for_oid(ExtensionOID.BASIC_CONSTRAINTS).value

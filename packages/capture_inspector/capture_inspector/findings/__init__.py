@@ -23,6 +23,7 @@ from .quality import _network_quality_findings
 from .access import _private_access_findings, _internal_traffic_findings
 from .latency import _latency_findings_har, _latency_findings_pcap, _geo_egress_latency_findings
 from .bottleneck import _bottleneck_findings
+from .opaque import _capture_ruled_out, _opaque_tunnel_findings
 from .steering import _steering_coverage_findings
 from .interception import _ja3s_findings, _local_interception_findings
 from .proxy_pac import _pac_wpad_findings
@@ -32,6 +33,7 @@ from .har_findings import (
 
 __all__ = [
     "_is_private_ip", "_is_loopback_ip", "_flow_label", "_pctl", "_fmt_clock",
+    "_opaque_tunnel_findings", "_capture_ruled_out",
     "_dns_findings", "_is_local_dns_name", "_swg_proxy_region_findings",
     "_roaming_findings", "_roaming_report_findings", "_ingress_health_findings",
     "_detect_duplicate_capture", "_duplicate_capture_findings",

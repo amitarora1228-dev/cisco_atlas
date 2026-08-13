@@ -24,6 +24,7 @@ from .findings.quality import _network_quality_findings
 from .findings.access import _private_access_findings, _internal_traffic_findings
 from .findings.latency import _latency_findings_har, _latency_findings_pcap, _geo_egress_latency_findings
 from .findings.bottleneck import _bottleneck_findings
+from .findings.opaque import _capture_ruled_out, _opaque_tunnel_findings
 from .findings.steering import _steering_coverage_findings
 from .findings.interception import _ja3s_findings, _local_interception_findings
 from .findings.proxy_pac import _pac_wpad_findings
@@ -576,6 +577,13 @@ def analyze(pcap_path: Optional[str], har_text: Optional[str], ctx: AnalysisCont
             # and the next-hop MTU they carry (RFC 1191) — proves PMTUD works and
             # reveals the tunnel's reduced MTU. Scans all packets, not just flows.
             result.signal_findings.extend(_icmp_pmtud_findings(packets))
+            # Tunnels that were established, returned almost nothing and were
+            # abandoned. The cause is inside the TLS and cannot be read, so this
+            # reports the pattern and hands over what the capture DID rule out —
+            # which is why it runs after the loss/latency/MTU checks above.
+            result.signal_findings.extend(_opaque_tunnel_findings(
+                target_flows, _capture_ruled_out(target_flows, is_dup_capture),
+                result.flow_reports))
             # Reduced / clamped TCP MSS: the client advertising a uniformly low
             # MSS reveals a reduced path MTU even when no ICMP is present (RFC 879;
             # the MSS-clamping fallback when PMTUD/ICMP is blocked). When the user

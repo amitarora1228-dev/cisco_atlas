@@ -7,11 +7,12 @@ timestamps, values) — nothing is invented.
 """
 from __future__ import annotations
 
+import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .certs import CertInfo, analyze_leaf_chain
+from .certs import CertInfo, analyze_leaf_chain, evaluate_at
 from .pcap import Flow, Packet, _to_int
 from . import tlsconst as T
 from .secure_access import describe as describe_ingress, is_private_access, is_internal_flow
@@ -554,6 +555,707 @@ def flow_timeline(flow: Flow, head: int = 120, tail: int = 60) -> dict:
     return {"events": kept, "total": total, "omitted": total - head - tail}
 
 
+# --- Connection story (the ladder, grouped by layer and explained) ------------
+#
+# flow_timeline() says what crossed the wire. This says what it meant, in the
+# order an engineer reads a connection: did the name resolve, did the socket
+# open, did the encryption negotiate. It adds no new measurement - every step
+# carries the frame number it came from, so any line can be checked in Wireshark.
+
+def _ms(a: float | None, b: float | None) -> float | None:
+    if a is None or b is None or b < a:
+        return None
+    return round((b - a) * 1000, 1)
+
+
+def _fact(label: str, value: Any, tone: str = "plain", note: str = "") -> dict:
+    return {"label": label, "value": str(value), "tone": tone, "note": note}
+
+
+def _human_bytes(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f} MB"
+    if n >= 1000:
+        return f"{n / 1000:.0f} KB"
+    return f"{n} B"
+
+
+def _story_dns(flow: Flow) -> dict | None:
+    lookup = flow.dns_lookup
+    if not lookup:
+        return None
+
+    name = lookup.get("name") or ""
+    addrs = lookup.get("addresses") or []
+    rcode = lookup.get("rcode")
+    elapsed = _ms(lookup.get("query_time"), lookup.get("response_time"))
+
+    # This record was matched to the flow by address. When the request on the
+    # connection names a different host - common on a shared block page, where
+    # many names resolve to one address - the request is the authority and the
+    # mismatch has to be said out loud rather than shown as a coincidence.
+    asked = {r.get("host") for r in flow.http_requests if r.get("host")}
+    conflict = name and asked and name not in asked
+    mismatch = (f"Matched to this connection by address. The request on it asked for "
+                f"{', '.join(sorted(asked)[:2])}, so several names share this address "
+                f"and this record may describe a different one.") if conflict else ""
+
+    steps = [{
+        "dir": "c2s", "msg": f"Query A? {name}",
+        "note": "asks for the server's address", "bad": False,
+    }]
+
+    if lookup.get("blocked"):
+        category = lookup.get("block_category")
+        steps.append({
+            "dir": "s2c",
+            "msg": f"Response {', '.join(addrs) if addrs else 'n/a'}",
+            "note": "answered with a block address"
+                    + (f" ({category})" if category else ""),
+            "bad": True,
+        })
+        return {"name": "DNS", "status": "fail",
+                "summary": "blocked by the resolver", "steps": steps, "why": mismatch}
+
+    if rcode not in (None, 0, "0"):
+        steps.append({"dir": "s2c", "msg": f"Response rcode: {rcode}",
+                      "note": "the name did not resolve", "bad": True})
+        return {"name": "DNS", "status": "fail",
+                "summary": f"failed - rcode {rcode}", "steps": steps, "why": mismatch}
+
+    steps.append({
+        "dir": "s2c",
+        "msg": f"Response {', '.join(addrs[:3]) if addrs else 'no address'}",
+        "ok_token": "rcode: NoError",
+        "note": "valid address returned", "bad": False,
+    })
+
+    facts = []
+    resolver = lookup.get("resolver")
+    if resolver:
+        named = lookup.get("resolver_name")
+        facts.append(_fact(
+            "Resolver", f"{resolver}{f' ({named})' if named else ''}",
+            "warn" if _is_loopback(resolver) else "plain",
+            "answered by software on this host, not a network resolver"
+            if _is_loopback(resolver) else ""))
+    if len(addrs) > 1:
+        facts.append(_fact("Addresses returned", len(addrs)))
+    cnames = lookup.get("cnames") or []
+    if cnames:
+        facts.append(_fact("CNAME chain", " \u2192 ".join(cnames[:4])))
+
+    summary = "resolved" + (f" \u00b7 {elapsed:g} ms" if elapsed is not None else "")
+    return {"name": "DNS", "status": "ok" if addrs else "warn",
+            "summary": summary, "steps": steps, "facts": facts, "why": mismatch}
+
+
+def _story_tcp(flow: Flow, marks: list[tuple]) -> dict | None:
+    if flow.transport != "tcp":
+        return None
+
+    syn = next((m for m in marks if m[1]["kind"] == "syn"), None)
+    synack = next((m for m in marks if m[1]["kind"] == "synack"), None)
+    steps: list[dict] = []
+
+    if syn:
+        steps.append({"dir": "c2s", "msg": "SYN", "pkt": syn[0].number,
+                      "note": "client requests to open a connection", "bad": False})
+    if synack:
+        steps.append({"dir": "s2c", "msg": "SYN, ACK", "pkt": synack[0].number,
+                      "note": "server agrees", "bad": False})
+        first_ack = next(
+            (m for m in marks
+             if m[1]["kind"] == "ack" and m[1]["dir"] == "c2s"
+             and m[0].time_relative >= synack[0].time_relative), None)
+        if first_ack:
+            steps.append({"dir": "c2s", "msg": "ACK", "pkt": first_ack[0].number,
+                          "note": "connection established", "bad": False})
+
+    if not steps:
+        # Capture began mid-session: the open is simply not in this file.
+        return {"name": "TCP", "status": "absent", "summary": "handshake not captured",
+                "steps": [], "why": "This capture starts after the connection was "
+                                    "already open, so the three-way handshake is not in it."}
+
+    if not synack:
+        return {"name": "TCP", "status": "fail",
+                "summary": "no answer to SYN", "steps": steps,
+                "why": "The server never completed the three-way handshake."}
+
+    rtt = flow.tcp_handshake_ms
+    summary = "connected \u00b7 3-way handshake" + (f", {rtt:g} ms" if rtt else "")
+
+    # Health is only worth stating when it is not the boring answer: a clean
+    # transport says nothing, a stalled or lossy one changes what you do next.
+    facts = []
+    if flow.initial_rtt_ms is not None:
+        facts.append(_fact("Network round trip", f"{flow.initial_rtt_ms:g} ms"))
+    if len(flow.ack_rtt_samples) > 1:
+        spread = round(statistics.pstdev(flow.ack_rtt_samples), 1)
+        facts.append(_fact(
+            "Round-trip variation", f"\u00b1{spread:g} ms over {len(flow.ack_rtt_samples)} samples",
+            "warn" if flow.initial_rtt_ms and spread > flow.initial_rtt_ms else "plain"))
+    real_loss = flow.retransmissions - flow.spurious_retransmissions
+    if real_loss > 0:
+        # Only state a ratio when there is a denominator that can hold it;
+        # retransmissions are counted per frame and can exceed the segments
+        # carrying new payload.
+        segments = flow.data_segments
+        value = (f"{real_loss} of {segments} data segments"
+                 if segments and segments >= real_loss else f"{real_loss} segment(s)")
+        facts.append(_fact(
+            "Retransmitted", value, "bad",
+            "the sender had to repeat data that did not arrive"))
+    if flow.lost_segments:
+        facts.append(_fact("Segments the capture never saw", flow.lost_segments, "bad"))
+    if flow.zero_window:
+        facts.append(_fact(
+            "Receiver stalled", f"{flow.zero_window} zero-window event(s)", "bad",
+            "the receiver told the sender to stop - an application stall, not loss"))
+    if flow.window_full:
+        facts.append(_fact(
+            "Receive window filled", f"{flow.window_full} time(s)", "warn",
+            "throughput capped by window size, nothing lost"))
+    if flow.ack_lost_segment:
+        facts.append(_fact(
+            "Acknowledged unseen data", flow.ack_lost_segment, "warn",
+            "one direction travelled a path this capture point cannot see"))
+    if flow.client_mss and flow.client_mss < 1460:
+        facts.append(_fact(
+            "Client MSS", f"{flow.client_mss} B", "warn",
+            "below the 1460 B Ethernet default - something in the path adds overhead"))
+    if flow.server_ttl is not None:
+        hops = _estimated_hops(flow.server_ttl)
+        facts.append(_fact(
+            "Distance to peer",
+            f"~{hops} hop(s)" if hops is not None else f"TTL {flow.server_ttl}",
+            "plain", f"TTL {flow.server_ttl} on the way back"
+            if hops is not None else ""))
+
+    # A segment larger than the MSS the peer agreed to was never a wire frame:
+    # the OS handed the NIC one buffer and the hardware split it. Packet counts
+    # and per-packet timing on this flow describe the host, not the network.
+    negotiated = min(flow.mss_values) if flow.mss_values else None
+    if negotiated and flow.max_tcp_len > negotiated:
+        facts.append(_fact(
+            "Largest segment", f"{flow.max_tcp_len} B vs {negotiated} B agreed", "warn",
+            "captured above the network card, so these are not individual "
+            "wire frames - read packet counts and per-packet timing with that in mind"))
+
+    if flow.rst_count:
+        who = ("client" if flow.client_reset else
+               "server" if flow.server_reset else "one side")
+        facts.append(_fact("Closed by", f"reset from the {who}", "warn",
+                           "an abrupt close, not a negotiated shutdown"))
+    elif flow.fin_count:
+        facts.append(_fact("Closed by", "FIN - orderly shutdown"))
+
+    return {"name": "TCP", "status": "ok", "summary": summary, "steps": steps,
+            "facts": facts}
+
+
+def _story_tls(flow: Flow, marks: list[tuple], rep: Any = None) -> dict | None:
+    hello = next((m for m in marks if "ClientHello" in m[1]["label"]), None)
+    if hello is None:
+        return None
+
+    detail = []
+    if flow.negotiated_version or flow.offered_versions:
+        detail.append(flow.negotiated_version or "/".join(flow.offered_versions))
+    if flow.alpn:
+        detail.append("ALPN " + ", ".join(flow.alpn))
+    if hello[1].get("bytes"):
+        detail.append(f"{hello[1]['bytes']} B")
+
+    # Collected with their packet time, then sorted: the sequence is the whole
+    # argument, so a step shown out of order would misrepresent what happened.
+    steps: list[tuple[float, dict]] = [(hello[0].time_relative, {
+        "dir": "c2s", "msg": "ClientHello", "detail": " \u00b7 ".join(detail),
+        "pkt": hello[0].number,
+        "note": "proposes encryption, names the host it wants", "bad": False,
+    })]
+
+    after_hello = [m for m in marks if m[0].time_relative >= hello[0].time_relative]
+    server_hello = next((m for m in after_hello if "ServerHello" in m[1]["label"]), None)
+    if server_hello:
+        steps.append((server_hello[0].time_relative, {
+            "dir": server_hello[1]["dir"], "msg": "ServerHello",
+            "pkt": server_hello[0].number,
+            "note": "server picks the cipher and replies", "bad": False}))
+
+    cert = next((m for m in after_hello
+                 if "Certificate" in m[1]["label"] and m is not server_hello), None)
+    if cert:
+        steps.append((cert[0].time_relative, {
+            "dir": cert[1]["dir"], "msg": "Certificate", "pkt": cert[0].number,
+            "note": "server presents its certificate", "bad": False}))
+
+    alert = next((m for m in marks if m[1]["kind"] == "alert"), None)
+    rst = next((m for m in marks if m[1]["kind"] == "rst"), None)
+
+    # An ACK from the server for the ClientHello, arriving before the server's
+    # own reset, is the difference between "dropped in the path" and "read, then
+    # refused". It only means that when the server is the one that reset.
+    acked_hello = None
+    if rst and rst[1]["dir"] == "s2c" and server_hello is None:
+        acked_hello = next(
+            (m for m in after_hello
+             if m[1]["dir"] == "s2c" and m[1]["kind"] == "ack"
+             and m[0].time_relative < rst[0].time_relative), None)
+        if acked_hello:
+            steps.append((acked_hello[0].time_relative, {
+                "dir": "s2c", "msg": "ACK", "pkt": acked_hello[0].number,
+                "note": "server confirms it received the ClientHello", "bad": False}))
+
+    if alert:
+        steps.append((alert[0].time_relative, {
+            "dir": alert[1]["dir"], "msg": alert[1]["label"], "pkt": alert[0].number,
+            "note": "the peer refused and said why", "bad": True}))
+
+    if rst:
+        gap = _ms(hello[0].time_relative, rst[0].time_relative)
+        who = "client" if rst[1]["dir"] == "c2s" else "server"
+        note = f"{who} tore the connection down"
+        if gap is not None:
+            note += f" {gap:g} ms after the ClientHello"
+        if server_hello is None and alert is None:
+            note += ". No ServerHello, no alert."
+        steps.append((rst[0].time_relative,
+                      {"dir": rst[1]["dir"], "msg": "RST", "pkt": rst[0].number,
+                       "note": note, "bad": True}))
+
+    ordered = [step for _, step in sorted(steps, key=lambda pair: pair[0])]
+
+    facts = []
+    if flow.has_ech:
+        facts.append(_fact(
+            "Encrypted ClientHello", "in use", "warn",
+            "the requested hostname is encrypted, so this connection cannot be "
+            "attributed to a site from the capture alone"))
+    if flow.cipher_suite:
+        facts.append(_fact("Cipher", flow.cipher_suite))
+    if flow.key_share_group:
+        facts.append(_fact("Key exchange", flow.key_share_group))
+    if flow.tls_setup_ms is not None:
+        tone, note = "plain", ""
+        # TLS negotiation costs a couple of round trips. Far more than that,
+        # against a fast socket, means something re-terminated the session.
+        if flow.tcp_handshake_ms and flow.tls_setup_ms > flow.tcp_handshake_ms * 5:
+            tone = "warn"
+            note = (f"{flow.tls_setup_ms / flow.tcp_handshake_ms:.0f}x the TCP "
+                    "handshake - the peer negotiated onward before answering")
+        facts.append(_fact("TLS setup", f"{flow.tls_setup_ms:g} ms", tone, note))
+    if flow.hello_retry_request:
+        facts.append(_fact(
+            "Retried key exchange",
+            f"{'/'.join(flow.hrr_offered_groups) or 'first choice'} refused, "
+            f"restarted with {flow.hrr_selected_group or 'another group'}",
+            "warn", "costs one extra round trip"))
+    if flow.ja3:
+        facts.append(_fact("JA3 (client stack)", flow.ja3))
+    if flow.ja3s:
+        facts.append(_fact("JA3S (server stack)", flow.ja3s))
+
+    cert = getattr(rep, "leaf_cert", None) if rep else None
+    if cert and not getattr(cert, "parse_error", None):
+        if cert.subject_cn:
+            facts.append(_fact("Certificate subject", cert.subject_cn))
+        issuer = cert.issuer_cn or cert.issuer_org
+        if issuer:
+            facts.append(_fact(
+                "Issued by", issuer,
+                "warn" if cert.looks_like_proxy_ca else "plain",
+                "a locally trusted CA, not a public one - this session was "
+                "decrypted and re-signed" if cert.looks_like_proxy_ca else ""))
+        if cert.not_after:
+            facts.extend(_cert_validity_facts(cert, flow))
+
+    shape = {
+        "steps": ordered,
+        "facts": facts,
+        "acked_hello": bool(acked_hello),
+        "server_hello": bool(server_hello),
+        "reset_by": (rst[1]["dir"] if rst else None),
+        "alert_by": (alert[1]["dir"] if alert else None),
+    }
+
+    if alert:
+        return {"name": "TLS", "status": "fail",
+                "summary": "failed \u00b7 alert raised", **shape}
+    if rst and not flow.handshake_complete:
+        who = "client" if rst[1]["dir"] == "c2s" else "server"
+        return {"name": "TLS", "status": "fail",
+                "summary": f"failed \u00b7 reset by the {who}", **shape}
+    if flow.handshake_complete:
+        return {"name": "TLS", "status": "ok",
+                "summary": "negotiated \u00b7 " + (flow.negotiated_version or "encrypted"),
+                **shape}
+    if not server_hello:
+        return {"name": "TLS", "status": "warn",
+                "summary": "no reply to ClientHello", **shape}
+    return {"name": "TLS", "status": "ok", "summary": "negotiated", **shape}
+
+
+def _story_tunnel(flow: Flow) -> dict | None:
+    """The hop the connection was actually carried over, when there was one.
+
+    A CONNECT tunnel or a local interception agent means the TLS above was
+    negotiated with a middlebox, not with the destination. Without this the
+    story would name the wrong peer.
+    """
+    if not (flow.is_connect_tunnel or flow.intercept_vendor or flow.chain_loopback_key):
+        return None
+
+    steps: list[dict] = []
+    facts: list[dict] = []
+    status = "ok"
+
+    if flow.is_connect_tunnel:
+        target = flow.connect_target or "the destination"
+        steps.append({"dir": "c2s", "msg": f"CONNECT {target}",
+                      "note": "asks the proxy to open a tunnel", "bad": False})
+        code = flow.connect_status
+        ok = str(code).startswith("2") if code else False
+        steps.append({
+            "dir": "s2c", "msg": f"{code or '?'} {flow.connect_phrase or ''}".strip(),
+            "note": "tunnel established" if ok else "the proxy refused the tunnel",
+            "bad": not ok,
+        })
+        if not ok:
+            status = "fail"
+        if flow.proxy_ip:
+            facts.append(_fact("Proxy", flow.proxy_ip))
+        if flow.tunnel_sni:
+            facts.append(_fact(
+                "Inner TLS", f"{flow.tunnel_sni}"
+                + (f" \u00b7 {flow.tunnel_tls_version}" if flow.tunnel_tls_version else ""),
+                "plain", "the session carried inside the tunnel"))
+
+    if flow.intercept_vendor:
+        facts.append(_fact(
+            "Terminated locally by", flow.intercept_vendor, "warn",
+            "this leg was decrypted on this machine before being sent on"))
+        facts.append(_fact(
+            "Outbound leg",
+            flow.chain_outbound_key or "not captured",
+            "plain" if flow.chain_outbound_key else "warn",
+            "" if flow.chain_outbound_key
+            else "the agent forwarded it on a path this capture did not see"))
+    elif flow.chain_loopback_key:
+        facts.append(_fact(
+            "Decrypted copy seen on loopback", flow.chain_loopback_key, "warn",
+            "correlated by hostname and time, not cryptographic proof"))
+
+    summary = ("tunnel refused" if status == "fail"
+               else "carried through an intermediary")
+    return {"name": "TUNNEL", "status": status, "summary": summary,
+            "steps": steps, "facts": facts}
+
+
+def _story_data(flow: Flow) -> dict | None:
+    """What the connection actually moved, once it was up."""
+    down, up = flow.bytes_s2c or 0, flow.bytes_c2s or 0
+    if not (down or up) or not flow.packets:
+        return None
+
+    duration = flow.packets[-1].time_relative - flow.packets[0].time_relative
+    facts = [_fact("Transferred",
+                   f"{_human_bytes(down)} in, {_human_bytes(up)} out")]
+    if duration > 0.5:
+        facts.append(_fact("Open for", f"{duration:.1f} s"))
+        rate = down / duration
+        tone = "bad" if (flow.zero_window and rate < 100_000) else "plain"
+        facts.append(_fact(
+            "Average inbound rate", f"{_human_bytes(int(rate))}/s", tone,
+            "far below what this round trip allows - the receiver was the limit"
+            if tone == "bad" else ""))
+    if flow.data_segments:
+        facts.append(_fact("Data segments", flow.data_segments))
+
+    return {"name": "DATA", "status": "ok", "summary": "transfer observed",
+            "steps": [], "facts": facts}
+
+
+def _estimated_hops(ttl: int) -> int | None:
+    """Distance to the peer, from how far its TTL has been decremented.
+
+    Senders start at 64, 128 or 255; routers decrement once per hop. The nearest
+    starting value above the observed TTL gives the hop count.
+    """
+    for start in (64, 128, 255):
+        if ttl <= start:
+            return start - ttl
+    return None
+
+
+def _story_http(flow: Flow) -> dict | None:
+    """What the application actually asked for, and what it was told.
+
+    This is the only layer that carries the server's own words. A 403 here is
+    the block itself, not an inference drawn from an address.
+    """
+    requests = [r for r in flow.http_requests if (r.get("method") or "").upper() != "CONNECT"]
+    statuses = [s for s in flow.http_statuses if s]
+    if not requests and not statuses:
+        return None
+
+    steps: list[dict] = []
+    for req in requests[:3]:
+        target = req.get("uri") or req.get("host") or ""
+        steps.append({
+            "dir": "c2s", "msg": f"{req.get('method', 'GET')} {target}"[:120],
+            "pkt": req.get("packet"),
+            "note": "the request the application made", "bad": False,
+        })
+
+    worst = "ok"
+    for code in statuses[:3]:
+        first = code[:1]
+        redirect = first == "3"
+        bad = first in ("4", "5")
+        note = {
+            "403": "forbidden - the server refused this request outright",
+            "407": "the proxy demands authentication",
+            "451": "blocked for legal or policy reasons",
+        }.get(code, "")
+        if not note:
+            if redirect:
+                note = "redirected elsewhere - often to a block or captive page"
+            elif bad:
+                note = "the server rejected the request"
+            else:
+                note = "the request was served"
+        steps.append({"dir": "s2c", "msg": f"HTTP {code}", "note": note, "bad": bad})
+        if bad:
+            worst = "fail"
+        elif redirect and worst == "ok":
+            worst = "warn"
+
+    facts = []
+    hosts = {r.get("host") for r in requests if r.get("host")}
+    if hosts:
+        facts.append(_fact("Requested host", ", ".join(sorted(hosts)[:3])))
+    if len(requests) > 3 or len(statuses) > 3:
+        facts.append(_fact("Exchanges on this connection",
+                           f"{len(requests)} request(s), {len(statuses)} response(s)"))
+
+    summary = {"fail": "the server refused", "warn": "redirected"}.get(
+        worst, "served in the clear")
+    return {"name": "HTTP", "status": worst, "summary": summary,
+            "steps": steps, "facts": facts}
+
+
+def _flow_moment(flow: Flow) -> float | None:
+    """When the traffic happened - the only defensible clock for judging it."""
+    return flow.packets[0].time_epoch if flow.packets else None
+
+
+def _cert_validity_facts(cert: Any, flow: Flow) -> list[dict]:
+    """State the certificate's validity window and whether it held at the time.
+
+    Nothing is flagged for expiring "soon". Time remaining is not a defect, and
+    it cannot be read without knowing the issuing policy: an interception proxy
+    mints certificates with a five-day life, so one day left is that certificate
+    working exactly as intended.
+    """
+    window = evaluate_at(cert, _flow_moment(flow))
+    if window.not_after is None:
+        return []
+
+    span = (f"{window.not_before.date()} \u2192 {window.not_after.date()}"
+            if window.not_before else f"until {window.not_after.date()}")
+    if window.status == "unknown":
+        return [_fact("Certificate validity", span)]
+
+    if window.status == "expired":
+        lasted = (f" It was issued for {window.lifetime_days} days."
+                  if window.lifetime_days is not None else "")
+        return [_fact(
+            "Certificate validity", span, "bad",
+            f"expired {window.days_outside} day(s) before this connection was made "
+            f"on {window.at.date()}.{lasted} The client was offered a certificate "
+            "that no longer validated, which on its own is enough for it to refuse "
+            "the handshake - renewing it is the fix, nothing about the network is wrong")]
+
+    if window.status == "not_yet_valid":
+        return [_fact(
+            "Certificate validity", span, "bad",
+            f"not valid yet: it only became valid {window.days_outside} day(s) after "
+            f"this connection on {window.at.date()}. Either the certificate was "
+            "issued with a future start date or the endpoint's clock is behind, and "
+            "a client rejects both the same way")]
+
+    return [_fact("Certificate validity", span, "plain",
+                  "valid when this connection was made")]
+
+
+def _story_conclusion(flow: Flow, layers: list[dict]) -> dict:
+    """State only what the captured packets support."""
+    by_name = {layer["name"]: layer for layer in layers}
+    dns, tcp, tls = by_name.get("DNS"), by_name.get("TCP"), by_name.get("TLS")
+    http = by_name.get("HTTP")
+    paragraphs: list[str] = []
+    fix = ""
+
+    dns_blocked = bool(dns and dns["status"] == "fail")
+    tcp_ok = bool(tcp and tcp["status"] == "ok")
+
+    if tcp_ok:
+        rtt = flow.tcp_handshake_ms
+        # After a DNS block the socket opens against the block page, so calling
+        # the path to "this destination" healthy would name the wrong peer.
+        where = "to the address that was returned" if dns_blocked else "to this destination"
+        paragraphs.append(
+            "The TCP connection opened normally"
+            + (f" in {rtt:g} ms" if rtt else "")
+            + (" and the name resolved first" if dns and dns["status"] == "ok" else "")
+            + f" - the network path {where} is working.")
+
+    # The server's own status code outranks anything inferred from an address.
+    if http and http["status"] == "fail":
+        codes = [s["msg"].replace("HTTP ", "") for s in http["steps"] if s.get("bad")]
+        paragraphs.append(
+            f"The server answered {', '.join(codes) or 'with an error'}. That is the "
+            "refusal itself, stated by the server in plain HTTP - not an inference "
+            "drawn from an address or a timing.")
+        if dns_blocked:
+            paragraphs.append(
+                "The lookup was already answered with a block address, so the "
+                "request reached a block page and that page refused it. Both "
+                "layers agree.")
+        fix = "This is a policy decision. Check the rule that matched this URL."
+
+    elif dns_blocked:
+        if tcp_ok:
+            paragraphs.append(
+                "The resolver did not hand back the real address for this name - "
+                "it answered with a block address, and the connection that "
+                "followed went to the block page rather than to the destination. "
+                "A connection that succeeds is not the same as a request that was "
+                "allowed.")
+        else:
+            paragraphs.append(
+                "The failure is in name resolution: the connection never had a "
+                "usable address to reach.")
+        fix = "Check the DNS policy for this name before looking at the network."
+
+    elif tcp and tcp["status"] == "fail":
+        paragraphs.append(
+            "The server never answered the SYN. From one capture point this cannot "
+            "be separated into 'unreachable', 'filtered' or 'not listening' - only "
+            "that no reply came back.")
+        fix = "Confirm the destination is reachable and listening on this port."
+
+    elif tls and tls["status"] == "fail":
+        if tls.get("alert_by"):
+            who = "client" if tls["alert_by"] == "c2s" else "server"
+            paragraphs.append(
+                f"The failure is entirely in the TLS layer, and the {who} said why - "
+                "the alert above is its own stated reason for refusing.")
+            fix = "Act on the alert reason; DNS and TCP need no changes."
+
+        elif tls.get("reset_by") == "c2s" and tls.get("server_hello"):
+            paragraphs.append(
+                "The failure is in the TLS layer, and it was the CLIENT that reset. "
+                "The server answered with its ServerHello, so the connection was "
+                "torn down after the client had seen the server's reply - not "
+                "because the server refused.")
+            paragraphs.append(
+                "A client that resets at this point has usually rejected what it "
+                "was shown, most often the certificate. This capture proves the "
+                "timing, not the motive: no alert was sent, so the client did not "
+                "state a reason.")
+            fix = ("Check the certificate the client was offered and the client's "
+                   "trust store; the server answered normally.")
+
+        elif tls.get("reset_by") == "c2s":
+            paragraphs.append(
+                "The client reset the connection after sending its ClientHello, "
+                "before the server replied. The server was still silent, so nothing "
+                "here shows the server refusing.")
+            fix = "Look at the client: it abandoned the connection first."
+
+        elif tls.get("acked_hello"):
+            paragraphs.append(
+                "The failure is entirely in the TLS layer. The order of the last "
+                "packets is what matters: the server acknowledged the ClientHello "
+                "before resetting. It received and read the hello, then chose to "
+                "close. A firewall or routing problem drops packets silently - it "
+                "does not acknowledge them first. This was a rejection, not a "
+                "network fault.")
+            paragraphs.append(
+                "No ServerHello and no TLS alert were sent, so the peer gave no "
+                "reason for the refusal.")
+            fix = ("Check the policy on the device that terminated this connection; "
+                   "DNS and TCP need no changes.")
+
+        elif tls.get("server_hello"):
+            paragraphs.append(
+                "The server replied with its ServerHello and then reset the "
+                "connection, so it abandoned a handshake it had already begun. No "
+                "alert was sent, so it gave no reason.")
+            fix = "Check the server or the device terminating TLS on its behalf."
+
+        else:
+            paragraphs.append(
+                "The connection was reset after the ClientHello, and the reset was "
+                "not preceded by an acknowledgement. This capture cannot tell "
+                "whether the server refused or something in the path dropped it.")
+            fix = "Capture at a second point to place where the reset originates."
+
+    elif tls and tls["status"] == "ok":
+        paragraphs.append(
+            "Encryption negotiated successfully"
+            + (f" using {flow.negotiated_version}" if flow.negotiated_version else "")
+            + ". Nothing in the connection set-up failed.")
+
+    elif tcp and tcp["status"] == "ok" and tls is None:
+        paragraphs.append(
+            "No TLS handshake was seen on this connection, so it was carried in "
+            "the clear or the encryption began before the capture started.")
+
+    if _is_loopback(flow.dst_ip):
+        paragraphs.append(
+            "Both endpoints are on 127.0.0.1: this connection never left the "
+            "machine, so whatever answered it is software running on this host "
+            "and not the remote destination.")
+
+    return {"paragraphs": paragraphs, "fix": fix}
+
+
+def connection_story(flow: Flow, rep: Any = None) -> dict | None:
+    """The connection told as a sequence of layers, each with its own verdict.
+
+    ``rep`` is the flow's analysis report when one exists; it only adds
+    certificate facts, so the story still works without it.
+    """
+    if not flow.packets:
+        return None
+
+    marks = [(pkt, _timeline_entry(flow, pkt)) for pkt in flow.packets]
+    layers = [layer for layer in (
+        _story_dns(flow),
+        _story_tcp(flow, marks),
+        _story_tunnel(flow),
+        _story_tls(flow, marks, rep),
+        _story_http(flow),
+        _story_data(flow),
+    ) if layer]
+    if not layers:
+        return None
+
+    server = flow.sni or flow.resolved_host or flow.dns_query or flow.dst_ip
+    return {
+        "client": {"addr": flow.src_ip or "client"},
+        "server": {"host": server if server != flow.dst_ip else None,
+                   "addr": flow.dst_ip or "server"},
+        "layers": layers,
+        "conclusion": _story_conclusion(flow, layers),
+    }
+
+
+
 # --- Per-flow analysis -------------------------------------------------------
 
 def analyze_flow(flow: Flow, corporate_ca_orgs: Counter, secure_access_mode: bool = False) -> FlowReport:
@@ -896,22 +1598,32 @@ def _flow_findings(flow: Flow, rep: FlowReport, secure_access_mode: bool = False
                 evidence=[f"issuer_cn={leaf.issuer_cn} issuer_org={leaf.issuer_org} subject_cn={leaf.subject_cn}"],
                 flow_key=fk,
             ))
-        if leaf.expired:
+        cert_window = evaluate_at(leaf, _flow_moment(flow))
+        if cert_window.status == "expired":
             rep.findings.append(Finding(
                 title="Server/leaf certificate is expired",
                 severity="high",
                 category="public_cert",
-                detail=f"The certificate presented for {sni} expired on {leaf.not_after}.",
-                evidence=[f"not_after={leaf.not_after} subject_cn={leaf.subject_cn} issuer={leaf.issuer_cn}"],
+                detail=(f"The certificate presented for {sni} expired on "
+                        f"{cert_window.not_after.date()}, "
+                        f"{cert_window.days_outside} day(s) before this traffic was "
+                        f"captured on {cert_window.at.date()}."),
+                evidence=[f"not_after={leaf.not_after} captured_at={cert_window.at.isoformat()} "
+                          f"subject_cn={leaf.subject_cn} "
+                          f"issuer={leaf.issuer_cn or leaf.issuer_org}"],
                 flow_key=fk,
             ))
-        if leaf.not_yet_valid:
+        if cert_window.status == "not_yet_valid":
             rep.findings.append(Finding(
                 title="Certificate not yet valid",
                 severity="high",
                 category="public_cert",
-                detail=f"The certificate for {sni} is not valid before {leaf.not_before}.",
-                evidence=[f"not_before={leaf.not_before} subject_cn={leaf.subject_cn}"],
+                detail=(f"The certificate for {sni} only became valid on "
+                        f"{cert_window.not_before.date()}, "
+                        f"{cert_window.days_outside} day(s) after this traffic was "
+                        f"captured on {cert_window.at.date()}."),
+                evidence=[f"not_before={leaf.not_before} captured_at={cert_window.at.isoformat()} "
+                          f"subject_cn={leaf.subject_cn}"],
                 flow_key=fk,
             ))
         # SNI vs certificate subject/SAN mismatch

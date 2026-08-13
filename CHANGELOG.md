@@ -18,6 +18,95 @@ under `[Unreleased]` until one is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Every connection now tells its story in the order it had to succeed.** The
+  packet ladder said *what* crossed the wire; nobody was reading it, because a
+  list of SYNs and ACKs does not say which layer failed. The same events are now
+  grouped into DNS, TCP, TUNNEL, TLS, HTTP and DATA, each with its own verdict
+  and the measurements the engine already had, and closed by a conclusion that
+  names the layer that broke. Every step carries its frame number so any claim
+  can be checked in Wireshark. Measured on a 20 MB capture: 1,603 stories, and
+  of 7,701 measurements emitted 6,414 are neutral, 1,259 are warnings and only
+  **28** are marked as problems - a healthy layer stays quiet rather than
+  padding the page with zeroes.
+
+  Validating it against real traffic found the logic blaming the wrong party.
+  The first version read an ACK before a reset as proof the *server* had refused,
+  and said so even when the server had answered with its ServerHello and the
+  *client* was the one that sent the reset: **51 of 55** flows in the test
+  capture were attributed backwards, and the steps were printed out of
+  chronological order, which is the whole argument. Direction is now read from
+  the reset itself. A client reset after a ServerHello says the client rejected
+  what it was shown - most often the certificate - and the text says that this
+  proves the timing, not the motive.
+
+- **Traffic that misbehaves inside an opaque tunnel is now reported, without a
+  cause being invented.** A CONNECT tunnel carrying TLS is opaque by design, so
+  the analyzer had only two habits: stay silent or guess. On a capture of a
+  YouTube session that never played, it stayed silent - **0 of 121** flows were
+  marked as having a problem, the worst severity in the whole file was `low`,
+  and the headline diagnosis was an mDNS lookup for a printer.
+
+  Four conditions together now raise a `high` finding: the tunnel was
+  established (CONNECT 2xx), less came back than went out, it was abandoned
+  without being closed, and at least three of them were opened to one service
+  within ten seconds. Each alone is ordinary traffic. On that capture: 3 tunnels
+  to 3 googlevideo endpoints in 0.3 s, **24,380 bytes returned for 82,115 sent**,
+  each dropped within 1.6 s. The finding states the pattern, says plainly that
+  the status code and the error are encrypted so rejection, throttling and the
+  client giving up cannot be told apart, lists what the capture *did* rule out,
+  and gives the three steps that would settle it. It names no root cause.
+
+### Fixed
+
+- **A certificate was called expired for having aged since the capture.** The
+  check compared `not_after` against `datetime.now()`, which answers a different
+  question from the one being asked: whether the certificate held *when the
+  traffic happened*. Every capture eventually ages past the certificates in it,
+  so old files turned into certificate incidents. Measured across the two test
+  captures, **all 16** such findings were wrong - `client.wns.windows.com` was
+  reported at `high` severity for expiring on 2026-03-09 in traffic captured on
+  **2026-03-06**, three days before it lapsed. All 63 certificates in those
+  captures were valid at the moment they were presented.
+
+  The reasoning also lived in four places - the findings engine, the connection
+  story, the text report and the API payload - and all four had the same defect,
+  which is how the bug survived being fixed once. There is now a single
+  `evaluate_at(cert, when)` in `certs.py`, and `CertInfo.expired` /
+  `not_yet_valid` were **removed** rather than deprecated: a field named
+  `expired` invites the next reader to believe it means "expired then". Without
+  a moment to judge against, the answer is `unknown` - never a silent fall back
+  to now.
+
+- **Certificates were flagged for having little life left.** Fourteen flows were
+  marked amber for expiring within 14 days. All fourteen were proxy-minted
+  certificates with a **five-day** total lifetime, so one day remaining is that
+  design working as intended; the threshold had been written for year-long
+  public certificates, of which the same capture held 49 at 1,095 days. Time
+  remaining cannot be read without knowing the issuing policy, so it is no
+  longer reported at all. Only a certificate outside its window at the time of
+  the connection is marked.
+
+- **The error column led with capture artefacts instead of the diagnosis.** A
+  flow whose finding was "tunnel opened, then abandoned" showed
+  `25 packet(s) sent again; 2 packet(s) arrived out of order` - counts already
+  known to be inflated by the same traffic being recorded on three interfaces,
+  and whose *findings* the analyzer had correctly suppressed. The raw counters
+  were still printed, and first. The diagnosis now leads and the counters follow.
+
+- **A capture-wide finding left every flow looking healthy.** `has_problem` is
+  computed only from a flow's own findings, so a finding about a group of
+  connections marked none of them and an "errors only" view showed nothing -
+  precisely the silence the finding exists to break. A pattern now marks every
+  connection it covers, not just the first.
+
+### Changed
+
+- **The packet-by-packet ladder is hidden.** The connection story is the reading
+  of the same events, so the raw sequence diagram is behind
+  `SHOW_PACKET_LADDER`, set to `false`. Set it to `true` to bring it back.
+
 ### Changed
 
 - **The path stitcher no longer compares every connection against every other.**

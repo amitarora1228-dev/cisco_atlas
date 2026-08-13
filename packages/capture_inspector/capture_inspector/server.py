@@ -11,12 +11,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .analyze import AnalysisContext, analyze
-from .certs import secure_access_chain
+from .certs import evaluate_at, secure_access_chain
 from .certfetch import fetch_certificate
 from .dns_analysis import dns_summary
 from .engine import Finding
 from .engine import _is_loopback
-from .engine import flow_timeline
+from .engine import connection_story, flow_timeline
 from .pcap import find_tshark
 from .report import render_report
 from .secure_access import lookup_ingress_region
@@ -548,7 +548,15 @@ async def api_analyze(
                 err_bits.append(f"{f.out_of_order} packet(s) arrived out of order")
             if f.zero_window:
                 err_bits.append(f"receiver full {f.zero_window} time(s)")
-            if not err_bits and fr.findings:
+            # Lead with the diagnosis when there is one. Raw counters such as
+            # "25 packets sent again" can be capture artefacts (duplicated
+            # interfaces, segmentation offload), and printing them first buries
+            # the finding that explains what actually happened.
+            lead = next((x.title for x in fr.findings
+                         if x.severity in ("critical", "high", "medium")), None)
+            if lead:
+                err_bits.insert(0, lead)
+            elif not err_bits and fr.findings:
                 err_bits.append(fr.findings[0].title)
             error_summary = "; ".join(err_bits) if err_bits else ""
 
@@ -645,13 +653,20 @@ async def api_analyze(
                 "server_ttl": f.server_ttl,
                 "server_synack": f.server_synack,
                 "timeline": flow_timeline(f),
+                "story": connection_story(f, fr),
                 "alerts": f.alerts,
                 "issuer": (fr.leaf_cert.issuer_cn or fr.leaf_cert.issuer_org) if fr.leaf_cert else None,
                 "subject": fr.leaf_cert.subject_cn if fr.leaf_cert else None,
                 "san": fr.leaf_cert.san_dns if fr.leaf_cert else [],
                 "cert_valid": (f"{fr.leaf_cert.not_before} \u2192 {fr.leaf_cert.not_after}"
                                if fr.leaf_cert and not fr.leaf_cert.parse_error else None),
-                "cert_expired": fr.leaf_cert.expired if fr.leaf_cert else False,
+                # Judged at the time of the traffic, not at the time of analysis:
+                # otherwise every capture eventually reports its own certificates
+                # as expired simply for having aged.
+                "cert_expired": (
+                    evaluate_at(fr.leaf_cert,
+                                f.packets[0].time_epoch if f.packets else None).status
+                    == "expired") if fr.leaf_cert else False,
                 "proxy_ca": fr.leaf_cert.looks_like_proxy_ca if fr.leaf_cert else False,
                 "secure_access_signed": (fr.leaf_cert.is_secure_access if fr.leaf_cert else False) and sa_mode,
                 "secure_access_chain": _sa_chain(fr) if sa_mode else None,

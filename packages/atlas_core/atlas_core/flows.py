@@ -172,6 +172,21 @@ class WireFlow:
     ``(epoch, src_ip, src_port, kind, payload_bytes)``. An intercepted flow has
     a real client and a real server, so it has a real packet ladder - these are
     what draws it. The middle of a long flow is elided, and the count says so."""
+    # What the connection said, summarised. Deliberately scalars and small
+    # tuples: this model is held for every flow in a session, so it must not
+    # grow with the number of packets.
+    tls_version: str | None = None
+    alpn: tuple[str, ...] = ()
+    handshake_seen: tuple[str, ...] = ()
+    """Which TLS handshake messages appeared, in order of first appearance."""
+    tls_alerts: tuple[str, ...] = ()
+    http_methods: tuple[str, ...] = ()
+    http_statuses: tuple[str, ...] = ()
+    first_uri: str | None = None
+    client_bytes: int = 0
+    server_bytes: int = 0
+    """Payload each way. A connection that sends far more than it receives is
+    doing something other than what it was opened for."""
 
     @property
     def is_loopback(self) -> bool:
@@ -394,7 +409,40 @@ _TSHARK_FIELDS = (
     "tcp.analysis.duplicate_ack",
     "tcp.analysis.zero_window",
     "tcp.analysis.out_of_order",
+    # What the packets actually said. Without these a ladder can only show that
+    # bytes moved; with them the same single pass can say the handshake
+    # completed, the peer refused, or the server answered 403.
+    "tls.handshake.type",
+    "tls.handshake.version",
+    "tls.record.version",
+    # TLS 1.3 pins the legacy version field at 0x0303 for middlebox
+    # compatibility, so reading only that would report every 1.3 session as
+    # 1.2. The real answer is in the supported_versions extension.
+    "tls.handshake.extensions.supported_version",
+    "tls.handshake.extensions_alpn_str",
+    "tls.alert_message.desc",
+    "http.request.method",
+    "http.request.full_uri",
+    "http.response.code",
 )
+
+_TLS_VERSIONS = {
+    "0x0301": "TLS 1.0",
+    "0x0302": "TLS 1.1",
+    "0x0303": "TLS 1.2",
+    "0x0304": "TLS 1.3",
+}
+
+# TLS handshake message numbers worth naming in a ladder (RFC 8446 B.3).
+_TLS_HANDSHAKE = {
+    "1": "clienthello",
+    "2": "serverhello",
+    "11": "certificate",
+    "12": "serverkeyexchange",
+    "14": "serverhellodone",
+    "16": "clientkeyexchange",
+    "20": "finished",
+}
 
 # How many packets of a connection are kept for its ladder, from each end. A
 # 7,256-packet flow is not readable and not worth holding in memory; the
@@ -455,6 +503,15 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             dup_ack,
             zero_window,
             out_of_order,
+            hs_type,
+            hs_version,
+            rec_version,
+            supported_version,
+            alpn,
+            alert_desc,
+            http_method,
+            http_uri,
+            http_code,
         ) = parts[: len(_TSHARK_FIELDS)]
         if not stream or not sport or not dport:
             continue
@@ -474,6 +531,11 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             payload_bytes = 0
             moment = 0.0
 
+        # Name the packet by what it carried, not merely that it carried
+        # something. A reader can act on "the server refused with a certificate
+        # alert"; "Data 517B" tells them nothing.
+        handshakes = [_TLS_HANDSHAKE[v] for v in hs_type.split(",")
+                      if v.strip() in _TLS_HANDSHAKE for v in [v.strip()]]
         if rst in {"1", "True"}:
             kind = "rst"
         elif fin in {"1", "True"}:
@@ -482,6 +544,14 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             kind = "syn"
         elif syn in {"1", "True"} and is_ack:
             kind = "synack"
+        elif alert_desc:
+            kind = "alert"
+        elif handshakes:
+            kind = handshakes[0]
+        elif http_code:
+            kind = "http_response"
+        elif http_method:
+            kind = "http_request"
         elif payload_bytes:
             kind = "data"
         else:
@@ -509,6 +579,15 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
                 "out_of_order": 0,
                 "syn_at": None,
                 "synack_at": None,
+                "tls_version": None,
+                "alpn": [],
+                "handshakes": [],
+                "alerts": [],
+                "methods": [],
+                "statuses": [],
+                "first_uri": None,
+                "client_bytes": 0,
+                "server_bytes": 0,
                 "head": [],
                 "tail": deque(maxlen=_PACKET_EDGE),
             }
@@ -572,6 +651,43 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             rec["head"].append(event)
         else:
             rec["tail"].append(event)
+
+        # Each list is capped: a connection can carry hundreds of requests and
+        # this model is kept for every flow in the session.
+        from_client = src == rec["src_ip"] and int(sport) == rec["src_port"]
+        if payload_bytes:
+            rec["client_bytes" if from_client else "server_bytes"] += payload_bytes
+        for name in handshakes:
+            if name not in rec["handshakes"] and len(rec["handshakes"]) < 12:
+                rec["handshakes"].append(name)
+        # The ServerHello's supported_version is the negotiated one; the legacy
+        # field only says what the connection is compatible with.
+        chosen = ""
+        for token in (supported_version or "").split(","):
+            token = token.strip().lower()
+            if token in _TLS_VERSIONS:
+                chosen = token
+                break
+        if not chosen:
+            chosen = (hs_version or rec_version or "").split(",")[0].strip().lower()
+        named = _TLS_VERSIONS.get(chosen)
+        if named and (not rec["tls_version"] or named > rec["tls_version"]):
+            rec["tls_version"] = named
+        for token in (alpn or "").split(","):
+            token = token.strip()
+            if token and token not in rec["alpn"] and len(rec["alpn"]) < 4:
+                rec["alpn"].append(token)
+        for token in (alert_desc or "").split(","):
+            token = token.strip()
+            if token and len(rec["alerts"]) < 6:
+                rec["alerts"].append(token)
+        if http_method and len(rec["methods"]) < 6:
+            rec["methods"].append(http_method.split(",")[0].strip())
+        if http_code and len(rec["statuses"]) < 8:
+            rec["statuses"].append(http_code.split(",")[0].strip())
+        if http_uri and not rec["first_uri"]:
+            rec["first_uri"] = http_uri.split(",")[0].strip()[:200]
+
         if sni and not rec["sni"]:
             rec["sni"] = sni.split(",")[0].strip()
         if when:
@@ -611,6 +727,15 @@ def extract_wire_flows(capture_path: str, tshark_path: str | None = None) -> lis
             ),
             head=tuple(rec["head"]),
             tail=tuple(rec["tail"]),
+            tls_version=rec["tls_version"],
+            alpn=tuple(rec["alpn"]),
+            handshake_seen=tuple(rec["handshakes"]),
+            tls_alerts=tuple(rec["alerts"]),
+            http_methods=tuple(rec["methods"]),
+            http_statuses=tuple(rec["statuses"]),
+            first_uri=rec["first_uri"],
+            client_bytes=rec["client_bytes"],
+            server_bytes=rec["server_bytes"],
         )
         for key, rec in sorted(building.items())
     ]
@@ -1341,6 +1466,7 @@ def _flow_payload(
         "explanation": _explain_flow(flow),
         "evidence": evidence,
         "timeline": _flow_timeline(flow),
+        "story": _flow_story(flow),
         "quality": _flow_quality(flow.wire),
         "tunnel_quality": _flow_quality(
             (tunnel_wires or {}).get(id(flow.tunnel)) if flow.tunnel is not None else None
@@ -1365,6 +1491,225 @@ _PACKET_LABELS = {
     "rst": "RST",
     "ack": "ACK",
 }
+
+
+def _fact(label: str, value: object, tone: str = "plain", note: str = "") -> dict:
+    return {"label": label, "value": str(value), "tone": tone, "note": note}
+
+
+def _human_bytes(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f} MB"
+    if n >= 1000:
+        return f"{n / 1000:.0f} KB"
+    return f"{n} B"
+
+
+_STEP_NOTES = {
+    "syn": "client requests to open a connection",
+    "synack": "server agrees",
+    "ack": "connection established",
+    "clienthello": "proposes encryption, names the host it wants",
+    "serverhello": "server picks the cipher and replies",
+    "certificate": "server presents its certificate",
+    "clientkeyexchange": "client sends its key material",
+    "finished": "handshake complete",
+    "alert": "the peer refused and said why",
+    "http_request": "the request the application made",
+    "http_response": "the server's answer",
+    "fin": "orderly close",
+    "rst": "connection torn down abruptly",
+}
+
+
+def _flow_story(flow: FlowCorrelation) -> dict | None:
+    """The connection read as a sequence of layers, each with its own verdict.
+
+    This is the correlation view's own story. It is built from the summarised
+    ``WireFlow`` rather than from packets, so it covers what that model holds -
+    TCP, the tunnel, TLS, HTTP and the transfer. There is no DNS layer here:
+    name resolution is UDP and this pass reads TCP only, so claiming one would
+    be inventing it.
+    """
+    wire = flow.wire
+    if wire is None:
+        return None
+
+    events = list(wire.head) + list(wire.tail)
+    by_kind = {kind for _t, _s, _p, kind, _b in events}
+    start = events[0][0] if events else 0.0
+
+    def steps_for(kinds: set[str]) -> list[dict]:
+        out = []
+        for moment, src_ip, src_port, kind, payload in events:
+            if kind not in kinds:
+                continue
+            from_client = src_ip == wire.src_ip and src_port == wire.src_port
+            label = _PACKET_LABELS.get(kind) or kind.replace("_", " ").title()
+            if kind == "data":
+                label = f"Data {payload}B"
+            out.append({
+                "dir": "c2s" if from_client else "s2c",
+                "msg": label,
+                "note": _STEP_NOTES.get(kind, ""),
+                "bad": kind in {"rst", "alert"},
+                "t": round(moment - start, 4),
+            })
+            if len(out) >= 8:
+                break
+        return out
+
+    layers: list[dict] = []
+
+    # --- TCP ---------------------------------------------------------------
+    tcp_facts = []
+    if wire.handshake_rtt is not None:
+        tcp_facts.append(_fact("Network round trip", f"{wire.handshake_rtt * 1000:.1f} ms"))
+    if len(wire.rtts) > 1:
+        spread = statistics.pstdev(wire.rtts) * 1000
+        tcp_facts.append(_fact(
+            "Round-trip variation", f"\u00b1{spread:.1f} ms over {len(wire.rtts)} samples",
+            "warn" if wire.handshake_rtt and spread > wire.handshake_rtt * 1000 else "plain"))
+    if wire.retransmissions:
+        tcp_facts.append(_fact("Retransmitted", f"{wire.retransmissions} segment(s)", "bad",
+                               "the sender had to repeat data that did not arrive"))
+    if wire.zero_windows:
+        tcp_facts.append(_fact("Receiver stalled", f"{wire.zero_windows} zero-window event(s)",
+                               "bad", "the receiver told the sender to stop"))
+    if wire.duplicate_acks:
+        tcp_facts.append(_fact("Duplicate ACKs", wire.duplicate_acks, "warn"))
+    if wire.out_of_order:
+        tcp_facts.append(_fact("Out of order", wire.out_of_order, "warn"))
+    if "rst" in by_kind:
+        tcp_facts.append(_fact("Closed by", "reset", "warn", "an abrupt close"))
+    elif "fin" in by_kind:
+        tcp_facts.append(_fact("Closed by", "FIN - orderly shutdown"))
+
+    if not wire.has_syn:
+        layers.append({"name": "TCP", "status": "absent", "steps": [], "facts": tcp_facts,
+                       "summary": "handshake not captured",
+                       "why": "This capture starts after the connection was already open."})
+    else:
+        rtt = f", {wire.handshake_rtt * 1000:.1f} ms" if wire.handshake_rtt else ""
+        layers.append({"name": "TCP", "status": "ok", "facts": tcp_facts,
+                       "summary": f"connected \u00b7 3-way handshake{rtt}",
+                       "steps": steps_for({"syn", "synack"})})
+
+    # --- TUNNEL ------------------------------------------------------------
+    if "CONNECT" in wire.http_methods:
+        ok = any(s.startswith("2") for s in wire.http_statuses)
+        layers.append({
+            "name": "TUNNEL", "status": "ok" if ok else "fail",
+            "summary": "tunnel established" if ok else "the proxy refused the tunnel",
+            "steps": steps_for({"http_request", "http_response"}),
+            "facts": [_fact("Proxy", f"{wire.dst_ip}:{wire.dst_port}")]
+                     + ([_fact("Requested", wire.first_uri)] if wire.first_uri else []),
+        })
+
+    # --- TLS ---------------------------------------------------------------
+    if wire.handshake_seen or wire.tls_alerts:
+        tls_facts = []
+        if wire.tls_version:
+            tls_facts.append(_fact("Version", wire.tls_version))
+        if wire.alpn:
+            tls_facts.append(_fact("ALPN", ", ".join(wire.alpn)))
+        complete = "serverhello" in wire.handshake_seen
+        if wire.tls_alerts:
+            status, summary = "fail", "failed \u00b7 alert raised"
+        elif not complete:
+            status, summary = "warn", "no reply to ClientHello"
+        else:
+            status = "ok"
+            summary = "negotiated \u00b7 " + (wire.tls_version or "encrypted")
+        layers.append({
+            "name": "TLS", "status": status, "summary": summary, "facts": tls_facts,
+            "steps": steps_for({"clienthello", "serverhello", "certificate",
+                                "clientkeyexchange", "finished", "alert"}),
+        })
+
+    # --- HTTP --------------------------------------------------------------
+    plain_http = [s for s in wire.http_statuses if s]
+    if plain_http and "CONNECT" not in wire.http_methods:
+        worst = "ok"
+        for code in plain_http:
+            if code[:1] in ("4", "5"):
+                worst = "fail"
+            elif code[:1] == "3" and worst == "ok":
+                worst = "warn"
+        layers.append({
+            "name": "HTTP", "status": worst,
+            "summary": {"fail": "the server refused", "warn": "redirected"}.get(
+                worst, "served in the clear"),
+            "steps": steps_for({"http_request", "http_response"}),
+            "facts": [_fact("Requested", wire.first_uri)] if wire.first_uri else [],
+        })
+
+    # --- DATA --------------------------------------------------------------
+    if wire.client_bytes or wire.server_bytes:
+        data_facts = [_fact("Transferred",
+                            f"{_human_bytes(wire.server_bytes)} in, "
+                            f"{_human_bytes(wire.client_bytes)} out")]
+        if wire.first_seen and wire.last_seen:
+            held = (wire.last_seen - wire.first_seen).total_seconds()
+            if held > 0.5:
+                data_facts.append(_fact("Open for", f"{held:.1f} s"))
+        data_facts.append(_fact("Packets", wire.packets))
+        layers.append({"name": "DATA", "status": "ok", "summary": "transfer observed",
+                       "steps": [], "facts": data_facts})
+
+    if not layers:
+        return None
+
+    return {
+        "client": {"addr": f"{wire.src_ip}:{wire.src_port}"},
+        "server": {"host": wire.sni or flow.destination, "addr": f"{wire.dst_ip}:{wire.dst_port}"},
+        "layers": layers,
+        "conclusion": _story_conclusion(flow, wire, layers),
+    }
+
+
+def _story_conclusion(flow: FlowCorrelation, wire: WireFlow, layers: list[dict]) -> dict:
+    """State only what these summarised events support."""
+    by_name = {layer["name"]: layer for layer in layers}
+    paragraphs: list[str] = []
+    fix = ""
+
+    tcp = by_name.get("TCP")
+    if tcp and tcp["status"] == "ok":
+        rtt = f" in {wire.handshake_rtt * 1000:.1f} ms" if wire.handshake_rtt else ""
+        paragraphs.append(f"The TCP connection opened normally{rtt} - the network path to "
+                          "this destination is working.")
+
+    tunnel, tls, http = by_name.get("TUNNEL"), by_name.get("TLS"), by_name.get("HTTP")
+    if tunnel and tunnel["status"] == "fail":
+        paragraphs.append("The intermediary refused to open the tunnel, so nothing beyond "
+                          "it was ever attempted.")
+        fix = "Check the policy on the proxy for this destination."
+    elif http and http["status"] == "fail":
+        codes = ", ".join(s for s in wire.http_statuses if s[:1] in ("4", "5"))
+        paragraphs.append(f"The server answered {codes}. That is the refusal itself, stated "
+                          "in plain HTTP rather than inferred.")
+        fix = "This is a policy or application decision. Check the rule that matched this URL."
+    elif tls and tls["status"] == "fail":
+        paragraphs.append("The failure is in the TLS layer: the peer raised an alert, which "
+                          "is its own stated reason for refusing.")
+        fix = "Act on the alert reason; the network path is not at fault."
+    elif tls and tls["status"] == "warn":
+        paragraphs.append("The client sent a ClientHello and no ServerHello was seen in the "
+                          "captured portion of this connection.")
+    elif tls and tls["status"] == "ok":
+        paragraphs.append("Encryption negotiated successfully"
+                          + (f" using {wire.tls_version}" if wire.tls_version else "")
+                          + ". Nothing in the connection set-up failed.")
+
+    if wire.zero_windows:
+        paragraphs.append("The receiver advertised a zero window: it told the sender to stop "
+                          "because its buffer was full. That is an application stall, not loss.")
+
+    paragraphs.append("This view reads the correlated summary of the connection, which holds "
+                      "TCP, tunnel, TLS, HTTP and transfer. Name resolution is not in it - "
+                      "DNS is UDP and this pass reads TCP only.")
+    return {"paragraphs": paragraphs, "fix": fix}
 
 
 def _flow_timeline(flow: FlowCorrelation) -> dict:

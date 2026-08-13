@@ -193,12 +193,42 @@ class HarEntry:
     # Per-request timing breakdown (milliseconds) from the HAR `timings` object.
     # -1/None means the phase was not applicable or not measured. `wait` is the
     # server think-time (TTFB); `ssl` is part of `connect` per the HAR spec.
+    t_blocked: float | None = None
     t_dns: Optional[float] = None
     t_connect: Optional[float] = None
     t_ssl: Optional[float] = None
     t_send: Optional[float] = None
     t_wait: Optional[float] = None
     t_receive: Optional[float] = None
+    # What actually crossed, as opposed to how long it took. A HAR states these
+    # exactly, where a capture can only infer them through encryption.
+    req_body_bytes: int | None = None
+    resp_body_bytes: int | None = None
+    content_bytes: int | None = None           # decoded size; > body when compressed
+    mime_type: str | None = None
+    post_mime: str | None = None               # what was uploaded, if anything
+    post_bytes: int | None = None
+    query_params: int = 0
+    # Response headers worth naming on their own: they answer questions people
+    # actually ask of a HAR - who served it, was it cached, was it redirected,
+    # and does the answer carry a cookie.
+    content_type: str | None = None
+    location: str | None = None
+    cache_control: str | None = None
+    set_cookie: bool = False
+    # Request context: what the page was doing when it made this call.
+    referer: str | None = None
+    origin: str | None = None
+    user_agent: str | None = None
+    sent_cookie: bool = False
+    sent_auth: bool = False
+    # Chrome and Edge record why the request happened at all.
+    resource_type: str | None = None
+    initiator: str | None = None
+    # Header counts, so a reader can tell a bare request from a heavy one
+    # without the headers themselves being shipped.
+    req_header_count: int = 0
+    resp_header_count: int = 0
 
 
 @dataclass
@@ -248,6 +278,25 @@ def _header(headers: list[dict], name: str) -> Optional[str]:
             val = h.get("value")
             return val if val not in (None, "") else None
     return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    """HAR sizes use -1 for "not available"; keep only real (>=0) values."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
+def _initiator_of(entry: dict) -> str | None:
+    """Why the browser made this request, when the exporter recorded it."""
+    raw = entry.get("_initiator")
+    if isinstance(raw, dict):
+        kind = raw.get("type")
+        url = raw.get("url")
+        return f"{kind} \u00b7 {url}" if kind and url else (kind or None)
+    return raw if isinstance(raw, str) else None
 
 
 def parse_har(raw: str) -> HarResult:
@@ -301,6 +350,11 @@ def parse_har(raw: str) -> HarResult:
             if not err_label:
                 err_label = f"Blocked by Secure Access \u2014 {block['block_type']}"
                 err_cat = "proxy"
+        req_headers = req.get("headers", []) or []
+        content = resp.get("content") or {}
+        post = req.get("postData") or {}
+        mime = (content.get("mimeType") or "").split(";")[0].strip() or None
+
         result.entries.append(HarEntry(
             url=url,
             host=host,
@@ -321,11 +375,32 @@ def parse_har(raw: str) -> HarResult:
             alt_svc=_header(resp_headers, "alt-svc"),
             block_type=block["block_type"] if block else None,
             block_info=block,
+            t_blocked=_pos(timings.get("blocked")),
             t_dns=_pos(timings.get("dns")),
             t_connect=_pos(timings.get("connect")),
             t_ssl=_pos(timings.get("ssl")),
             t_send=_pos(timings.get("send")),
             t_wait=_pos(timings.get("wait")),
             t_receive=_pos(timings.get("receive")),
+            req_body_bytes=_int_or_none(req.get("bodySize")),
+            resp_body_bytes=_int_or_none(resp.get("bodySize")),
+            content_bytes=_int_or_none(content.get("size")),
+            mime_type=mime,
+            post_mime=(post.get("mimeType") or "").split(";")[0].strip() or None,
+            post_bytes=len(post.get("text") or "") or None,
+            query_params=len(req.get("queryString") or []),
+            content_type=_header(resp_headers, "content-type"),
+            location=_header(resp_headers, "location"),
+            cache_control=_header(resp_headers, "cache-control"),
+            set_cookie=bool(_header(resp_headers, "set-cookie")),
+            referer=_header(req_headers, "referer"),
+            origin=_header(req_headers, "origin"),
+            user_agent=_header(req_headers, "user-agent"),
+            sent_cookie=bool(_header(req_headers, "cookie")),
+            sent_auth=bool(_header(req_headers, "authorization")),
+            resource_type=e.get("_resourceType"),
+            initiator=_initiator_of(e),
+            req_header_count=len(req_headers),
+            resp_header_count=len(resp_headers),
         ))
     return result

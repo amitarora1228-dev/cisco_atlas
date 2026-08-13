@@ -1570,7 +1570,62 @@ function connectionLadder(f) {
   </details>`;
 }
 
+// A HAR states plainly several things a capture can only infer through
+// encryption: the decoded body size, the MIME type, why the browser made the
+// request at all. How much of that exists depends on the exporter - a browser
+// records phase timings and an initiator, a proxy-side tool usually records
+// neither - so anything absent is reported as absent rather than left blank.
 function harDetail(h) {
+  const ms = (v) => (v != null ? `${v} ms` : null);
+  const bytes = (v) => {
+    if (v == null) return null;
+    if (v >= 1000000) return `${(v / 1000000).toFixed(1)} MB`;
+    if (v >= 1000) return `${(v / 1000).toFixed(1)} KB`;
+    return `${v} B`;
+  };
+
+  // Phase timings, as a proportional bar plus the numbers behind it.
+  // Per the HAR spec `ssl` is measured INSIDE `connect`, so charting both as
+  // siblings counts the handshake twice - visible as a connect and a TLS
+  // segment of near-identical length. Show the TCP part on its own.
+  const tcpConnect = (h.t_connect != null && h.t_ssl != null)
+    ? Math.round(Math.max(h.t_connect - h.t_ssl, 0) * 10) / 10
+    : h.t_connect;
+
+  const PHASES = [
+    ["Blocked / queued", h.t_blocked, "#8e7cc3"],
+    ["DNS", h.t_dns, "#7c5cbf"],
+    ["Connect (TCP)", tcpConnect, "#3e84e5"],
+    ["TLS handshake", h.t_ssl, "#d4691a"],
+    ["Send", h.t_send, "#c47d04"],
+    ["Wait (server)", h.t_wait, "#0f7b8a"],
+    ["Receive", h.t_receive, "#1f9d57"],
+  ].filter(([, v]) => v != null && v > 0);
+  const phaseTotal = PHASES.reduce((a, [, v]) => a + v, 0);
+  const timingBlock = PHASES.length
+    ? `<div class="detail-block">
+        <h4>Where the time went</h4>
+        <div class="har-bar">${PHASES.map(([n, v, c]) =>
+          `<span class="har-seg" style="width:${(v / phaseTotal) * 100}%;background:${c}" title="${esc(n)}: ${v} ms"></span>`).join("")}</div>
+        ${PHASES.map(([n, v, c]) =>
+          `<div class="har-phase"><span class="har-dot" style="background:${c}"></span>
+             <span class="har-pn">${esc(n)}</span><span class="har-pv">${v} ms</span>
+             <span class="har-pp">${((v / phaseTotal) * 100).toFixed(0)}%</span></div>`).join("")}
+      </div>`
+    : `<div class="detail-block">
+        <h4>Where the time went</h4>
+        <div class="muted">This export carries no phase breakdown \u2014 only a total
+        of ${h.duration_ms != null ? h.duration_ms + " ms" : "unknown"}. Browser
+        exports record DNS, connect, TLS, send, wait and receive separately;
+        proxy-side exports usually do not.</div>
+      </div>`;
+
+  const compression = (h.content_bytes != null && h.resp_body_bytes)
+    ? (h.content_bytes > h.resp_body_bytes
+        ? `${(h.content_bytes / h.resp_body_bytes).toFixed(1)}\u00d7 smaller on the wire`
+        : "not compressed")
+    : null;
+
   return `<div class="detail-inner">
     <div class="detail-block">
       <h4>Request</h4>
@@ -1579,15 +1634,43 @@ function harDetail(h) {
       ${kv("Host", h.host)}
       ${kv("URL", h.url)}
       ${kv("HTTP", h.http_version)}
-      ${kv("Duration", h.duration_ms != null ? h.duration_ms + " ms" : null)}
+      ${kv("Duration", ms(h.duration_ms))}
+      ${kv("Why it was requested", h.initiator)}
+      ${kv("Resource type", h.resource_type)}
+      ${kv("Query parameters", h.query_params || null)}
+      ${kv("Referred from", h.referer)}
+      ${kv("Origin", h.origin)}
     </div>
     <div class="detail-block">
       <h4>Result</h4>
       ${kv("Status", h.status + (h.status_text ? " " + h.status_text : ""))}
+      ${kv("Redirected to", h.location)}
       ${kv("Server IP", h.server_ip)}
+      ${kv("Served by", h.server_header)}
+      ${kv("Through", h.via)}
+      ${kv("Advertises", h.alt_svc)}
       ${kv("Error", h.error)}
       ${kv("Classified as", h.error_label)}
       ${kv("Category", h.category)}
+    </div>
+    ${timingBlock}
+    <div class="detail-block">
+      <h4>What crossed</h4>
+      ${kv("Content type", h.content_type || h.mime_type)}
+      ${kv("Response body", bytes(h.resp_body_bytes))}
+      ${kv("Decoded size", bytes(h.content_bytes))}
+      ${kv("Compression", compression)}
+      ${kv("Request body", bytes(h.req_body_bytes))}
+      ${kv("Uploaded", h.post_bytes ? `${bytes(h.post_bytes)}${h.post_mime ? " of " + esc(h.post_mime) : ""}` : null)}
+      ${kv("Headers", (h.req_header_count || h.resp_header_count)
+        ? `${h.req_header_count || 0} sent \u00b7 ${h.resp_header_count || 0} received` : null)}
+      ${kv("Caching", h.cache_control)}
+      ${kv("Credentials", [
+        h.sent_cookie ? "cookie sent" : null,
+        h.sent_auth ? "authorization sent" : null,
+        h.set_cookie ? "cookie set by server" : null,
+      ].filter(Boolean).join(" \u00b7 ") || null)}
+      ${kv("Client", h.user_agent)}
     </div>
     ${h.block_info ? blockInfoDetail(h.block_info) : ""}
   </div>`;

@@ -5,7 +5,7 @@ finish.** It is the one place that says what exists, where each thing stands, an
 what is known to be broken. If it disagrees with any other document, this file is
 right and the other one is stale.
 
-**Last updated:** 2026-08-14 · branch `main` · head `7f20a1a`+ (connection story; certificate validity judged at capture time; opaque-tunnel finding)
+**Last updated:** 2026-08-14 · branch `main` · head `3b6fddd`+ (connection story in the correlation view; richer HAR detail)
 
 ---
 
@@ -210,6 +210,8 @@ fallback, but PATH is the supported arrangement.
 | Run-everything results view (summary mode) | **Done** — see below |
 | Rename to ATLAS (user-facing) | **Done** |
 | Per-connection story (DNS/TCP/TUNNEL/TLS/HTTP/DATA with verdicts) | **Done** — replaces the packet ladder as the primary view |
+| Same story in the correlation view | **Done** — built from `WireFlow`; no DNS layer there, and it says so |
+| HAR entry detail | **Done** — 30 fields and a phase chart, from 11 |
 | Certificate validity judged at capture time | **Done** — single `evaluate_at` in `certs.py`, 16 false findings removed |
 | Reporting a fault whose cause is encrypted | **Done** — opaque-tunnel finding; states the pattern, never a cause |
 | Identity join (org ID) in `atlas_core` | **Done**, unproven against a real bundle |
@@ -378,6 +380,20 @@ Ordered by how likely they are to bite.
    basis; where it does not, it says that too. Do not add wording that turns a
    correlation into a cause - that mistake has already been made and cost 51 of
    55 flows being blamed on the wrong party.
+6. **The correlation story has no DNS layer.** `extract_wire_flows` filters on
+   `-Y tcp` and name resolution is UDP. The conclusion states this on every
+   flow, because a layer that is simply missing reads as a layer that was fine.
+   Adding it means a second pass or a widened filter, and the flow model is
+   keyed by `tcp.stream`.
+7. **TLS inside a CONNECT tunnel is invisible to the correlation pass.** The
+   capture engine gets it with a second dissection (`run_tunnel_tls`);
+   `atlas_core` does not do that pass, so a proxied session shows the tunnel and
+   the transfer but no inner handshake.
+8. **A HAR is only as rich as its exporter.** Browser exports carry the full
+   phase breakdown, referer, origin and an initiator; proxy-side exports
+   typically carry none of those. Measured: 14 of 15 entries with phases in a
+   browser file, 0 of 302 in a tool-generated one. The view reports the absence
+   and its reason rather than rendering an empty block.
 6. **Tailwind loads from a CDN at runtime** (`cdn.tailwindcss.com`), which
    Tailwind itself warns is not for production, and which is a network dependency
    at page load. Preflight is disabled; a scoped compatibility layer in the bundle
@@ -454,6 +470,14 @@ Two things to know before touching this:
 
 Every one of these was a real failure here, not a hypothetical.
 
+- **`tls.handshake.version` does not give the negotiated version.** TLS 1.3
+  pins that legacy field at `0x0303` for middlebox compatibility, so reading it
+  reports every 1.3 session as 1.2 - silently, and for every flow. Take the
+  version from `tls.handshake.extensions.supported_version` and fall back to the
+  legacy field only when it is absent. Cross-checked: 166 TLS 1.3 sessions by
+  this method, 166 by the capture engine's independent path.
+- **The HAR spec measures `ssl` inside `connect`.** Charting them as siblings
+  draws the handshake twice and makes a fast socket look slow. Subtract.
 - **Judge a certificate against the traffic, never against `now()`.** Comparing
   `not_after` with the time of analysis answers a different question, and every
   capture eventually ages past the certificates inside it. All 16 expiry

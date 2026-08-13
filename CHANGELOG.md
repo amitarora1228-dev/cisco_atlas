@@ -20,6 +20,58 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **The correlation view tells the same story as the capture view.** It was
+  still drawing the old packet ladder - `SYN`, `ACK`, `Data 517B` - which says
+  that bytes moved but not what they were, so the layer that failed was left for
+  the reader to work out. The obstacle was real: correlation is built on
+  `WireFlow`, a deliberately summarised model held for every flow in a session,
+  and it carried only five packet kinds. Enriching it was chosen over faking it.
+
+  Seven fields were added to the **same single tshark pass**, and the summaries
+  they feed are capped rather than per-packet - at most 12 handshake names, 8
+  statuses, 4 ALPN tokens - so the model does not grow with traffic. Packet
+  kinds went from 5 to 12, adding `clienthello`, `serverhello`, `certificate`,
+  `clientkeyexchange`, `alert`, `http_request` and `http_response`. Measured on
+  a 937-flow capture, the story now covers TCP on **937** flows, the transfer on
+  489, TLS on 232, the tunnel on 178 and plain HTTP on 8.
+
+  It reports no DNS layer, and says why: this pass filters on TCP and name
+  resolution is UDP. A silently missing layer would read as a clean lookup.
+
+  Caught while building it: reading the negotiated version from
+  `tls.handshake.version` would have labelled **every** TLS 1.3 session as 1.2,
+  because 1.3 pins that legacy field at `0x0303` for middlebox compatibility.
+  The version now comes from the `supported_versions` extension, and the count
+  agrees exactly with what the capture engine reports independently - 166 and
+  166. The field name was verified against tshark first, since one unknown `-e`
+  aborts the entire run rather than degrading.
+
+- **A HAR entry now shows what the file actually recorded.** The detail view
+  displayed **11** fields; the API was already sending 45. The phase timings in
+  particular were parsed, transported and never drawn. It now shows **30**
+  fields plus a proportional phase chart, adding why the browser made the
+  request, the resource type, referer and origin, the redirect target, who
+  served it, the decoded body size and compression ratio, what was uploaded,
+  header counts, caching and whether credentials were sent.
+
+  Nothing was being dropped at parse time, which is worth recording because it
+  was the first suspicion: 302 of 302 entries and 15 of 15 in the two test
+  files. What varies is the exporter, not the parser. A browser export carries
+  the full phase breakdown (14 of 15 entries); a proxy-side export carries none
+  (0 of 302). Where the phases are absent the view says so and names the reason,
+  rather than leaving the block empty.
+
+### Fixed
+
+- **The HAR phase chart counted the TLS handshake twice.** Charting `connect`
+  and `ssl` as siblings put a connect segment and a TLS segment of near
+  identical length side by side - 139.2 ms and 137.9 ms on one request - because
+  the HAR spec measures `ssl` *inside* `connect`. Subtracting gives the honest
+  split, and it inverts the reading: that request spent **1.3 ms** opening the
+  socket and **137.9 ms** in the handshake.
+
+### Added
+
 - **Every connection now tells its story in the order it had to succeed.** The
   packet ladder said *what* crossed the wire; nobody was reading it, because a
   list of SYNs and ACKs does not say which layer failed. The same events are now

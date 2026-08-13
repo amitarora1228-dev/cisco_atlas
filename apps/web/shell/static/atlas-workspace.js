@@ -1530,6 +1530,8 @@
         });
         html += "</div>";
 
+        html += flowStory(flow);
+
         html += flowLadder(flow);
 
         html += flowQuality(flow);
@@ -1719,7 +1721,89 @@
         return html;
     }
 
+    // The correlation view's own connection story. It is built from the
+    // summarised wire flow rather than from packets, so it covers TCP, the
+    // tunnel, TLS, HTTP and the transfer - and says so, because there is no DNS
+    // layer here and a reader must not take its absence for a clean lookup.
+    var CORR_LAYER_ICON = {
+        TCP: "shield", TUNNEL: "lock", TLS: "shield", HTTP: "globe", DATA: "stack",
+    };
+
+    function flowStory(flow) {
+        var story = flow.story;
+        if (!story || !story.layers || !story.layers.length) return "";
+
+        var layers = story.layers.map(function (layer) {
+            var steps = (layer.steps || []).map(function (step) {
+                return "<div class=\"st-step dir-" + (step.dir === "c2s" ? "out" : "in")
+                    + (step.bad ? " st-bad" : "") + "\">"
+                    + "<span class=\"st-arrow\">" + (step.dir === "c2s" ? "\u2192" : "\u2190") + "</span>"
+                    + "<span class=\"st-msg\">" + esc(step.msg)
+                    + (step.note ? " <span class=\"st-note\">\u2014 " + esc(step.note) + "</span>" : "")
+                    + (step.t !== undefined ? "<span class=\"st-pkt\">" + step.t + "s</span>" : "")
+                    + "</span></div>";
+            }).join("");
+
+            var facts = (layer.facts || []).map(function (fact) {
+                return "<div class=\"st-fact tone-" + esc(fact.tone || "plain") + "\">"
+                    + "<span class=\"st-fk\">" + esc(fact.label) + "</span>"
+                    + "<span class=\"st-fv\">" + esc(fact.value) + "</span>"
+                    + (fact.note ? "<span class=\"st-fn\">" + esc(fact.note) + "</span>" : "")
+                    + "</div>";
+            }).join("");
+
+            var mark = layer.status === "ok" ? "\u2713" : layer.status === "fail" ? "\u2715" : "!";
+            return "<div class=\"st-layer st-" + esc(layer.status) + " lyr-"
+                + esc(String(layer.name).toLowerCase()) + "\">"
+                + "<div class=\"st-head\">"
+                + "<span class=\"st-badge\">" + esc(layer.name) + "</span>"
+                + "<span class=\"st-rule\"></span>"
+                + "<span class=\"st-pill st-pill-" + esc(layer.status) + "\"><b>" + mark
+                + "</b> " + esc(layer.summary || "") + "</span></div>"
+                + (steps ? "<div class=\"st-steps\">" + steps + "</div>" : "")
+                + (layer.why ? "<div class=\"st-why\"><span>" + esc(layer.why) + "</span></div>" : "")
+                + (facts ? "<div class=\"st-facts" + (layer.name === "DATA" ? " st-facts-strip" : "")
+                    + "\">" + facts + "</div>" : "")
+                + "</div>";
+        }).join("");
+
+        var conclusion = story.conclusion || {};
+        var paragraphs = (conclusion.paragraphs || []).map(function (text) {
+            return "<p>" + esc(text) + "</p>";
+        }).join("");
+        var fix = conclusion.fix
+            ? "<p class=\"st-fix\"><span class=\"st-fixk\">FIX</span>" + esc(conclusion.fix) + "</p>"
+            : "";
+
+        var failing = story.layers.filter(function (l) { return l.status === "fail"; })[0];
+        var banner = failing
+            ? "<div class=\"st-verdict st-verdict-fail\">Failed at <b>" + esc(failing.name)
+                + "</b> \u2014 " + esc(failing.summary || "") + "</div>"
+            : "<div class=\"st-verdict st-verdict-ok\">Completed \u2014 no layer failed</div>";
+
+        var host = story.server && story.server.host ? esc(story.server.host) : "";
+        return "<div class=\"detail-block story-block\">"
+            + "<h4>What happened, in order</h4>" + banner
+            + "<div class=\"st-ends\"><div class=\"st-end\"><span>"
+            + "<span class=\"st-role\">Client</span><span class=\"st-addr\">"
+            + esc((story.client || {}).addr || "client") + "</span></span></div>"
+            + "<div class=\"st-swap\">\u21c4</div>"
+            + "<div class=\"st-end st-right\"><span><span class=\"st-role\">Server</span>"
+            + "<span class=\"st-addr\">" + (host ? "<b>" + host + "</b> \u00b7 " : "")
+            + esc((story.server || {}).addr || "server") + "</span></span></div></div>"
+            + layers
+            + (paragraphs || fix
+                ? "<div class=\"st-concl\"><h5>\u2691 Conclusion</h5>" + paragraphs + fix + "</div>"
+                : "")
+            + "</div>";
+    }
+
+    // The raw ladder is superseded by the story above, which reads the same
+    // events. Set to true to bring the packet-by-packet diagram back.
+    var SHOW_CORR_LADDER = false;
+
     function flowLadder(flow) {
+        if (!SHOW_CORR_LADDER) return "";
         var timeline = flow.timeline || {};
         var events = timeline.events || [];
         if (!events.length) return "";

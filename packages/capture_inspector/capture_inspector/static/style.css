@@ -818,6 +818,19 @@ button.ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 .int-tag { display: inline-block; margin-left: 4px; padding: 1px 5px; border-radius: 6px;
   font-size: 10px; font-weight: 700; letter-spacing: .3px; background: #eef1f6; color: #51607a; border: 1px solid #d3dbe8; }
 
+/* HAR phase breakdown. The bar is proportional so a request dominated by server
+   think-time looks different at a glance from one dominated by transfer. */
+.har-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+  background: #eef1f5; margin: 4px 0 10px; max-width: 520px; }
+.har-seg { display: block; height: 100%; }
+.har-phase { display: flex; align-items: baseline; gap: 8px; font-size: 12px;
+  padding: 2px 0; max-width: 520px; }
+.har-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.har-pn { color: var(--muted); min-width: 130px; }
+.har-pv { font-family: var(--mono, ui-monospace, monospace); font-weight: 700;
+  color: #1f2937; }
+.har-pp { margin-left: auto; color: #9aa4b4; font-size: 11px; }
+
 /* Connection story — the ladder read as a narrative: each protocol layer in the
    order it had to succeed, its own verdict, and which one actually failed.
 

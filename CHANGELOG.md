@@ -20,6 +20,69 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **The detection engine was cross-examined against tshark, and the result is
+  written down.** A hundred and two checks across four harnesses
+  (`tools/_validate_*.py`) re-derive independently what the engine claims: TCP
+  and TLS counters, the interpretive calls about direction and blame, the
+  rule-based findings, and the deep work — inner-tunnel TLS, certificate
+  issuers, JA3/JA3S, ECH, ALPN, CONNECT targets. All 102 agree, on 46,884
+  packets across three captures.
+
+  Thirteen checks failed on the way there. **Twelve were defects in the harness,
+  not in the engine**, and two of those are worth keeping because they look like
+  bugs and are not. The inner SNI does not match the CONNECT target in the DLP
+  capture, because all 178 CONNECT lines name an *address* — the client resolved
+  the name itself, and recovering `claude.ai` from inside the tunnel is the
+  entire point of the second pass. And certificate issuers come from parsing the
+  DER, so the engine reports names that `tshark -e x509sat.*` never exposes;
+  ground truth for that has to be the full `-V` dissection. A third was simply
+  wrong arithmetic on my part: `tcp.analysis.initial_rtt` is attached to every
+  frame of a stream, so taking a median over frames weights it by whichever flow
+  carried the most packets. Deduplicated by stream, engine and tshark agree
+  exactly — 585, 75 and 11 flows, identical medians.
+
+  **The thirteenth was real.** `analyze_dns` keeps one record per name, so when
+  the roaming module on `127.0.0.1` answered `malware.com` with NXDOMAIN and
+  `8.8.8.8` answered the same name with SERVFAIL, only SERVFAIL survived. The
+  disagreement between the two resolvers *is* the diagnosis — it shows the local
+  module blocking a name the external resolver did not — and the model discards
+  it. Recorded in `VALIDATION_GAPS.md` §2.11 rather than patched, because keying
+  records by (name, resolver) changes the DNS model and the views built on it.
+
+  The harnesses are committed rather than described, so the claim can be
+  re-checked instead of believed.
+
+### Changed
+
+- **`VALIDATION_GAPS.md` now separates what was measured from what was
+  reasoned.** The document already carried an honesty rule; what it lacked was
+  evidence. It now records the 95 checks, an end-to-end plan sequenced so each
+  stage is provable before the next begins, and a deferred list that names, for
+  every blocked item, the exact capture or key log that would unblock it.
+
+  Three measured findings were added that the document did not have:
+
+  **The latency thresholds cannot fire.** Across 810 flows in three captures
+  they produced zero findings — the constants sit 7–25x above the p95 of every
+  capture we hold. Being absolute they are also too *low* for a satellite or
+  long-haul link, where a 400 ms median would make every flow fire. They are
+  currently decoration.
+
+  **Six signal families are in our captures and we walk past them.** Counted,
+  not assumed: 919 TCP window-scale options (without which the window we print
+  is wrong by up to 2^14), 76 SACK blocks, 60 session tickets, 16 OCSP stapling
+  requests, 4 HTTPS/SVCB records — the record that carries ECH configuration and
+  therefore the mechanism that will one day hide the SNI from Secure Access —
+  and 12 DNS queries over TCP.
+
+  **Eleven of 69 detectors have never executed.** Including expired
+  certificates, name mismatch and TLS alerts. Their first real run would
+  otherwise be at a customer.
+
+  A web-layer gap list was added with the standards behind each item, and two
+  quiet corrections: ECH is still `draft-ietf-tls-esni`, not an RFC, and WPAD
+  was never standardised at all — its draft expired in 1999.
+
 - **The correlation view tells the same story as the capture view.** It was
   still drawing the old packet ladder - `SYN`, `ACK`, `Data 517B` - which says
   that bytes moved but not what they were, so the layer that failed was left for

@@ -10,6 +10,12 @@ a "why it was flagged" explanation, a real-world analogy, and remediation steps
 (the `CLASSIFICATION_LABELS / _WHY / _EXAMPLE / _REMEDIATION` tables in
 `analyze.py`).
 
+**This document says what a detector is meant to do. It does not say whether
+that was ever proven.** For the evidence — which detectors were cross-checked
+against tshark, which have never executed, and what each blocked item is waiting
+for — see [VALIDATION_GAPS.md](VALIDATION_GAPS.md). Read the two together;
+neither is complete alone.
+
 ---
 
 ## 1. TLS interception by an SWG / proxy (`interception`)

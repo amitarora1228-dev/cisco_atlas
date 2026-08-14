@@ -5,7 +5,7 @@ finish.** It is the one place that says what exists, where each thing stands, an
 what is known to be broken. If it disagrees with any other document, this file is
 right and the other one is stale.
 
-**Last updated:** 2026-08-14 · branch `main` · head `3b6fddd`+ (connection story in the correlation view; richer HAR detail)
+**Last updated:** 2026-08-14 · branch `main` · head `82b4811`+ (detection engine cross-validated against tshark: 102 checks, four re-runnable harnesses)
 
 ---
 
@@ -359,23 +359,45 @@ own results land and a pointer nobody saw is the same as no pointer.
 
 Ordered by how likely they are to bite.
 
-1. **The bundle engine re-extracts the archive on every check.** Around 1.3 s per
+1. **The latency thresholds cannot fire.** Zero findings across 810 flows in
+   three captures: the constants in `findings/latency.py` sit 7–25x above the
+   p95 of every capture we hold, and being absolute they would fire on *every*
+   flow over a satellite link. They should be relative to the capture's own
+   baseline. Measured, not estimated — the numbers are in
+   [VALIDATION_GAPS.md](../packages/capture_inspector/docs/VALIDATION_GAPS.md) §1.2.
+2. **Eleven of 69 detectors have never executed on real data.** Expired and
+   not-yet-valid certificates, name mismatch, TLS alerts, weak TLS version, the
+   asymmetric-routing positive tier, QUIC bypass, PAC/WPAD success, Private
+   Access, internal traffic, geo-egress latency. They can be covered with
+   synthetic flows without waiting for captures, and until they are, their first
+   real run happens at a customer.
+3. **Six signal families are present in our captures and unread.** 919 window
+   scale, 76 SACK blocks, 60 session tickets, 16 OCSP stapling requests, 4
+   HTTPS/SVCB records, 12 DNS-over-TCP. The window-scale one is an accuracy
+   defect, not just a gap: without the shift factor the advertised window we
+   print can be wrong by a factor of 2^14.
+4. **One DNS record per name hides resolver disagreement.** When the roaming
+   module on loopback blocks a name with NXDOMAIN and the external resolver
+   answers SERVFAIL, only one survives — and the disagreement was the diagnosis.
+   Seen on `malware.com` in the DLP capture. Fixing it means keying records by
+   (name, resolver), which changes the DNS model and its views.
+5. **The bundle engine re-extracts the archive on every check.** Around 1.3 s per
    check, and now the dominant cost of a run-everything. It scales with bundle
    size, so the 358 MB test bundle will be slow. Fixing it means separating
    extraction from analysis inside the engine.
-2. **`/atlas/api/bundle/analyze-all` has no test.** Verified by hand against a
+6. **`/atlas/api/bundle/analyze-all` has no test.** Verified by hand against a
    real bundle only.
-3. **VPN, Umbrella, UZTNA and EDLP are not implemented** in the bundle engine.
+7. **VPN, Umbrella, UZTNA and EDLP are not implemented** in the bundle engine.
    They are accepted and return only a payload-received line; the route still
    carries a placeholder where the parsing would go. Only **ZTA** and **Duo
    Desktop** do real work. They are excluded from run-everything for that reason.
-4. **Nothing inside a CONNECT tunnel can be read without a key log.** The status
+8. **Nothing inside a CONNECT tunnel can be read without a key log.** The status
    code, the error and the payload are encrypted, so rejection by the
    destination, throttling by the intermediary and the client giving up are
    indistinguishable. The opaque-tunnel finding reports the pattern and says so
    rather than guessing; a capture supplied with `SSLKEYLOGFILE` removes the
    blind spot entirely.
-5. **The connection story cannot say why, only when.** It reports sequence and
+9. **The connection story cannot say why, only when.** It reports sequence and
    measurement. Where the evidence supports a motive it says so and marks the
    basis; where it does not, it says that too. Do not add wording that turns a
    correlation into a cause - that mistake has already been made and cost 51 of
@@ -668,6 +690,7 @@ Full reasoning in [ASSESSMENT.md](ASSESSMENT.md) §10.
 | [PHASE1_UNIFICATION.md](PHASE1_UNIFICATION.md) | The UI unification plan and its measurements |
 | [PHASE2_CORRELATION.md](PHASE2_CORRELATION.md) | What correlation makes possible, in dependency order |
 | [`packages/capture_inspector/docs/DETECTION.md`](../packages/capture_inspector/docs/DETECTION.md) | Every capture detector: what it detects, how, and what it cannot see |
+| [`packages/capture_inspector/docs/VALIDATION_GAPS.md`](../packages/capture_inspector/docs/VALIDATION_GAPS.md) | What has been proven against real captures, what has not, the end-to-end plan, and what each blocked item is waiting for |
 | [`packages/capture_inspector/docs/HANDOFF.md`](../packages/capture_inspector/docs/HANDOFF.md) | Capture engine internals |
 
 ---

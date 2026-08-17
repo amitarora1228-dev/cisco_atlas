@@ -38,8 +38,18 @@ if (-not (Test-Path $python)) {
 # python-evtx was replaced by pyevtx-rs. They install as 'Evtx' and 'evtx', which
 # collide on any case-insensitive filesystem - Windows, and macOS by default.
 # pip will not remove the old one on its own, so an existing venv needs this.
-& $python -c "import Evtx" 2>$null
-if ($LASTEXITCODE -eq 0) {
+# The probe is meant to fail once the venv is clean, but any native command
+# writing to stderr is a terminating error under ErrorActionPreference=Stop, so
+# the preference is relaxed for the probe alone and only the exit code is read.
+$evtxPresent = $false
+try {
+    $ErrorActionPreference = "Continue"
+    & $python -c "import Evtx" 2>&1 | Out-Null
+    $evtxPresent = ($LASTEXITCODE -eq 0)
+} finally {
+    $ErrorActionPreference = "Stop"
+}
+if ($evtxPresent) {
     Write-Host "[atlas] removing superseded python-evtx"
     & $python -m pip uninstall --quiet --yes python-evtx
 }

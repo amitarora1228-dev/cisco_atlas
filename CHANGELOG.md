@@ -18,6 +18,21 @@ under `[Unreleased]` until one is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`run.ps1` could not start ATLAS on a clean virtualenv.** The script probes
+  for the superseded `python-evtx` package by importing it, and that import is
+  *meant* to fail once the venv is clean. But the script sets
+  `ErrorActionPreference = "Stop"`, and under PowerShell 5.1 a native command
+  writing anything to stderr raises a terminating `NativeCommandError` — so the
+  probe's own traceback aborted the launcher at that line, before the server
+  ever started. Neither `2>$null` nor `2>&1 | Out-Null` suppresses it.
+
+  The effect was backwards: the launcher worked only while the obsolete package
+  was still installed, and broke as soon as the cleanup it performs had
+  succeeded. The preference is now relaxed for the probe alone and only the exit
+  code is read. Verified by starting the server on a clean venv.
+
 ### Added
 
 - **The detection engine was cross-examined against tshark, and the result is

@@ -35,6 +35,30 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **A DNS flow now says what it asked for and what came back.** It already
+  carried a `DNS query` badge and then told you nothing: not the name, not the
+  answer. The reason is worth recording, because it looks like an oversight and
+  is not. `_correlate_dns_to_flows` keys lookups by *destination address*, which
+  is how an IP-only connection gets tied back to the hostname that produced it.
+  A DNS conversation's destination is the resolver, so that correlation runs in
+  the wrong direction and leaves the flow with nothing to attach.
+
+  The lookups a flow carries are now read from the flow itself. Queries and
+  replies are paired by transaction ID (RFC 1035 §4.1.1), which is what makes a
+  request and its answer one exchange rather than two unrelated events, and the
+  DNS layer of the connection story reports each name with the addresses it
+  resolved to, the CNAME chain it travelled, and the resolver that answered.
+
+  Two things it deliberately does not do. It does not claim `A` for every query:
+  the type is read and named, which is how a set of ISE captures turned out to
+  be asking for `HTTPS` records (RFC 9460) all along. And it does not flag an
+  empty `AAAA` reply, because a name with no IPv6 address answering NODATA is
+  ordinary rather than a fault — the first draft called that a warning on every
+  IPv4-only name in the capture.
+
+  Bounded at twelve exchanges per flow so a busy resolver conversation cannot
+  grow the payload without limit. Ten tests.
+
 - **The detection engine was cross-examined against tshark, and the result is
   written down.** A hundred and two checks across four harnesses
   (`tools/_validate_*.py`) re-derive independently what the engine claims: TCP

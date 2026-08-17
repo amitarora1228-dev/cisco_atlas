@@ -645,6 +645,7 @@ async def api_analyze(
                 "dns_resolver": f.dns_resolver,
                 "resolved_host": f.resolved_host,
                 "dns_lookup": f.dns_lookup,
+                "dns_exchanges": f.dns_exchanges,
                 "tls_status": fr.tls_status,
                 "block_category": fr.block_category,
                 "response_ms": _handshake_ms(f),

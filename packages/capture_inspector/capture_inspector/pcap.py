@@ -520,6 +520,10 @@ class Flow:
     dns_query: Optional[str] = None           # first queried name (cleartext DNS)
     dns_resolver: Optional[str] = None        # known public resolver name, if any
     resolved_host: Optional[str] = None       # hostname from the pcapng Name Resolution Block (NRB)
+    # What this flow asked the resolver, and what came back. Only set when the
+    # flow IS the DNS conversation; dns_lookup below is the opposite direction,
+    # matching some other flow's destination back to the name that produced it.
+    dns_exchanges: list[dict[str, Any]] = field(default_factory=list)
     # The DNS lookup (seen earlier in THIS capture) that resolved to dst_ip — ties
     # an IP-only connection back to the hostname the client actually requested.
     dns_lookup: Optional[dict[str, Any]] = None

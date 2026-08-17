@@ -17,6 +17,7 @@ from .pcap import Flow, Packet, _to_int
 from . import tlsconst as T
 from .secure_access import describe as describe_ingress, is_private_access, is_internal_flow
 from .dns_analysis import (
+    RCODE_LABELS,
     block_category_for_ip,
     dns_resolver_name,
     is_block_page_domain,
@@ -50,6 +51,56 @@ def _l7_protocol(flow: "Flow") -> str | None:
         if token in seen:
             return label
     return None
+
+
+# One conversation can carry many lookups, and a resolver under load can carry a
+# great many. Enough to show the pattern, bounded so a busy flow cannot grow the
+# payload without limit.
+_MAX_DNS_EXCHANGES = 12
+
+# The query types worth naming. Anything else is shown by its numeric code.
+_DNS_QTYPES = {"1": "A", "2": "NS", "5": "CNAME", "6": "SOA", "12": "PTR",
+               "15": "MX", "16": "TXT", "28": "AAAA", "33": "SRV",
+               "43": "DS", "48": "DNSKEY", "64": "SVCB", "65": "HTTPS"}
+
+
+def _dns_exchanges(flow: Flow) -> list[dict]:
+    """What this flow asked the resolver, and what came back.
+
+    Queries and answers are paired by transaction ID (RFC 1035 s4.1.1), which is
+    what makes a request and its reply one exchange rather than two events. An
+    entry with no rcode was never answered.
+    """
+    seen: dict[str, dict] = {}
+    for pkt in flow.packets:
+        name = pkt.first("dns.qry.name")
+        if not name:
+            continue
+        # Fall back to the name when the ID is absent so a lone query still shows.
+        txid = pkt.first("dns.id") or name
+        entry = seen.get(txid)
+        if entry is None:
+            if len(seen) >= _MAX_DNS_EXCHANGES:
+                continue
+            entry = seen[txid] = {"name": name, "addresses": [], "cnames": [],
+                                  "qtype": _DNS_QTYPES.get(
+                                      (pkt.first("dns.qry.type") or "").split(",")[0],
+                                      pkt.first("dns.qry.type") or "A"),
+                                  "rcode": None, "answered": False}
+        if pkt.first("dns.flags.response") != "1":
+            continue
+        entry["answered"] = True
+        rcode = pkt.first("dns.flags.rcode")
+        entry["rcode"] = _to_int(rcode) if rcode is not None else entry["rcode"]
+        for key, bucket in (("dns.a", "addresses"), ("dns.aaaa", "addresses"),
+                            ("dns.cname", "cnames")):
+            for raw in pkt.all(key):
+                for value in str(raw).split(","):
+                    value = value.strip()
+                    if value and value not in entry[bucket]:
+                        entry[bucket].append(value)
+    return list(seen.values())
+
 
 # GREASE reserved values (RFC 8701): 0x0a0a, 0x1a1a, ... 0xfafa. They are
 # deliberately random placeholders and must be ignored in version/cipher lists.
@@ -441,6 +492,7 @@ def enrich_flow(flow: Flow) -> None:
         if q:
             flow.dns_query = q
             break
+    flow.dns_exchanges = _dns_exchanges(flow)
     flow.dns_resolver = dns_resolver_name(flow.dst_ip) or dns_resolver_name(flow.src_ip)
 
     # Latency markers. TCP handshake RTT = client SYN (syn=1, ack=0) -> server
@@ -580,7 +632,87 @@ def _human_bytes(n: int) -> str:
     return f"{n} B"
 
 
+def _story_dns_conversation(flow: Flow) -> dict | None:
+    """This flow is the DNS conversation. Report each name it asked for and the
+    addresses that came back - the answer an address-keyed correlation cannot
+    give, because this flow's destination is the resolver, not the resolved host.
+    """
+    steps: list[dict] = []
+    facts: list[dict] = []
+    resolved = failed = silent = 0
+
+    for ex in flow.dns_exchanges:
+        name = ex.get("name") or "?"
+        addrs = ex.get("addresses") or []
+        rcode = ex.get("rcode")
+        qtype = ex.get("qtype") or "A"
+        steps.append({"dir": "c2s", "msg": f"Query {qtype}? {name}", "note": "", "bad": False})
+
+        if not ex.get("answered"):
+            silent += 1
+            steps.append({"dir": "s2c", "msg": "No response",
+                          "note": "the resolver never answered", "bad": True})
+            facts.append(_fact(name, "no response", "bad"))
+            continue
+
+        if rcode:
+            failed += 1
+            label, why = RCODE_LABELS.get(rcode, (str(rcode), ""))
+            steps.append({"dir": "s2c", "msg": f"Response {label}",
+                          "note": why, "bad": True})
+            facts.append(_fact(name, label, "bad", why))
+            continue
+
+        resolved += 1
+        cnames = ex.get("cnames") or []
+        # An AAAA with no answer is an ordinary NODATA on an IPv4-only name, and
+        # a CNAME-only reply still resolved. Neither is worth flagging.
+        empty_is_normal = qtype != "A" or bool(cnames)
+        shown = ", ".join(addrs[:3]) + (f" (+{len(addrs) - 3} more)" if len(addrs) > 3 else "")
+        steps.append({
+            "dir": "s2c",
+            "msg": f"Response {shown if addrs else 'no address'}",
+            "ok_token": "rcode: NoError",
+            "note": "" if addrs or empty_is_normal else "answered, but carried no address",
+            "bad": False,
+        })
+        facts.append(_fact(
+            f"{name} ({qtype})",
+            ", ".join(addrs[:4]) + (f" (+{len(addrs) - 4})" if len(addrs) > 4 else "")
+            if addrs else "no address",
+            "plain" if addrs or empty_is_normal else "warn"))
+        if cnames:
+            facts.append(_fact(f"{name} via", " \u2192 ".join(cnames[:3])))
+
+    if not steps:
+        return None
+
+    resolver = flow.dst_ip
+    if resolver:
+        named = dns_resolver_name(resolver)
+        facts.insert(0, _fact(
+            "Resolver", f"{resolver}{f' ({named})' if named else ''}",
+            "warn" if _is_loopback(resolver) else "plain",
+            "answered by software on this host, not a network resolver"
+            if _is_loopback(resolver) else ""))
+
+    total = resolved + failed + silent
+    if silent:
+        status, summary = "fail", f"{silent} of {total} unanswered"
+    elif failed:
+        status, summary = "fail", f"{failed} of {total} did not resolve"
+    else:
+        status, summary = "ok", f"resolved {resolved} name{'s' if resolved != 1 else ''}"
+    return {"name": "DNS", "status": status, "summary": summary,
+            "steps": steps, "facts": facts}
+
+
 def _story_dns(flow: Flow) -> dict | None:
+    # A flow that carries lookups is the conversation itself; dns_lookup is the
+    # other direction, tying some other flow's address back to a name.
+    if flow.dns_exchanges:
+        return _story_dns_conversation(flow)
+
     lookup = flow.dns_lookup
     if not lookup:
         return None

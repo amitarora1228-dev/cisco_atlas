@@ -2024,13 +2024,18 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     // Evidence rendered as plain-English rows describing what
                     // was logged (no raw developer log lines).
                     if (groups.length) {
-                        const typeWord = groups.length === 1 ? 'event type' : 'event types';
+                        const isDestinationKind = card.group_kind === 'destination';
+                        const typeWord = isDestinationKind
+                            ? (groups.length === 1 ? 'destination' : 'destinations')
+                            : (groups.length === 1 ? 'event type' : 'event types');
                         const toggle = document.createElement('button');
                         toggle.type = 'button';
                         toggle.className = 'dh-evidence-toggle';
                         toggle.setAttribute('aria-expanded', 'false');
                         const setToggleLabel = (open) => {
-                            toggle.textContent = `${open ? '\u25be Hide' : '\u25b8 Show'} what was logged (${groups.length} ${typeWord})`;
+                            toggle.textContent = isDestinationKind
+                                ? `${open ? '\u25be Hide' : '\u25b8 Show'} top destinations (${groups.length})`
+                                : `${open ? '\u25be Hide' : '\u25b8 Show'} what was logged (${groups.length} ${typeWord})`;
                         };
                         setToggleLabel(false);
                         const list = document.createElement('div');
@@ -2040,7 +2045,12 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         const maxCount = Math.max(1, ...sortedGroups.map((g) => num(g.count)));
                         const totalCount = sortedGroups.reduce((sum, g) => sum + num(g.count), 0);
                         sortedGroups.forEach((group) => {
-                            const desc = describeEvidenceLine(group.label);
+                            const rawLabel = String(group.label || '');
+                            // Destination labels are hostnames - show them
+                            // verbatim; the log-line describer would mangle them.
+                            const desc = isDestinationKind
+                                ? { icon: '\uD83C\uDF10', text: rawLabel }
+                                : describeEvidenceLine(rawLabel);
                             const n = num(group.count);
                             const row = document.createElement('div');
                             row.className = 'dh-evrow';
@@ -5974,10 +5984,10 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     spaTargetInputHint.textContent = 'Press Enter in this field to run analysis immediately.';
                 }
             } else if (selectedSpaCheck.value === 'Flow Analysis') {
-                spaTargetInputLabel.textContent = 'Flow Analysis - Enter IP, FQDN, or SRV Record';
+                spaTargetInputLabel.textContent = 'Flow Analysis - Enter IP, FQDN, name, or SRV Record';
                 if (spaTargetInputHint) {
                     spaTargetInputHint.classList.remove('hidden');
-                    spaTargetInputHint.innerHTML = '<strong>SRV records (starting with _) run an SRV Flow; enter type=33 to list every SRV flow when you don\u2019t know the record.</strong> Otherwise the SPA/SIA flow is chosen by the selected access mode. Source port is optional. Press Enter to run.';
+                    spaTargetInputHint.innerHTML = '<strong>SRV records (starting with _) run an SRV Flow; enter type=33 to list every SRV flow when you don\u2019t know the record.</strong> A partial name works too - <code>whatsapp</code> matches <code>api.whatsapp.net</code>. Otherwise the SPA/SIA flow is chosen by the selected access mode. Source port is optional. Press Enter to run.';
                 }
             } else {
                 spaTargetInputLabel.textContent = 'SPA Flow - Please Enter IP or FQDN';

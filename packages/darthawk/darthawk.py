@@ -3018,24 +3018,76 @@ def parse_new_redirected_flow_line(line_text):
     line = str(line_text).strip()
     if "new redirected flow:" not in line:
         return None
+    return parse_zta_flow_line(line)
+
+
+# Some builds (notably macOS) never emit "new redirected flow:" at the shipped
+# log level, but still record the same flow on other events - either with the
+# full `TCP destination [host]:port srcPort=N` fields (closeObsoleteAppFlows) or
+# with the compact `tcp:<srcPort>__<host>` transport id (AppSocketTransport).
+# Recognising those keeps Flow Analysis usable on such bundles.
+_ZTA_FLOW_EVENT_LABELS = (
+    ("new redirected flow:", "new redirected flow"),
+    ("closeobsoleteappflows()", "flow closed (obsolete ProxyConfig)"),
+    ("force closing app flow", "flow closed"),
+    ("onappsocketwritecomplete()", "socket write failed"),
+    ("onappsocketreadcomplete()", "socket read failed"),
+    ("handleclose()", "flow closed"),
+    ("handlerequesttimeout()", "request timed out"),
+)
+
+_ZTA_COMPACT_FLOW_RE = re.compile(r"(?:^|[\s=])(tcp|udp):(\d+)__([A-Za-z0-9._\-]+)", re.IGNORECASE)
+
+
+def parse_zta_flow_line(line_text):
+    """Parse any ZTA log line that identifies a flow by destination and source port."""
+    line = str(line_text).strip()
 
     timestamp_match = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)", line)
+    if not timestamp_match:
+        return None
+
     flow_match = re.search(
-        r"new redirected flow:\s+(TCP|UDP)\s+destination\s+\[([^\]]+)\]:(\d+)\s+srcPort=(\d+)",
+        r"(TCP|UDP)\s+destination\s+\[([^\]]+)\]:(\d+)\s+srcPort=(\d+)",
         line,
         re.IGNORECASE,
     )
+    if flow_match:
+        protocol = flow_match.group(1).upper()
+        destination = flow_match.group(2).strip()
+        destination_port = flow_match.group(3).strip()
+        source_port = flow_match.group(4).strip()
+    else:
+        compact_match = _ZTA_COMPACT_FLOW_RE.search(line)
+        if not compact_match:
+            return None
+        protocol = compact_match.group(1).upper()
+        source_port = compact_match.group(2).strip()
+        destination = compact_match.group(3).strip().rstrip(".,;")
+        destination_port = ""
+
     process_match = re.search(r"process=<([^|>]+)\|PID\s+(\d+)\|user\s+([^>]+)>", line)
     parent_process_match = re.search(r"parentProcess=<([^|>]+)\|PID\s+(\d+)\|user\s+([^>]+)>", line)
     match_rule_type_match = re.search(r"matchRuleType=([^\s]+)", line)
 
-    if not timestamp_match or not flow_match:
-        return None
+    lowered = line.lower()
+    event = "flow event"
+    for needle, label in _ZTA_FLOW_EVENT_LABELS:
+        if needle in lowered:
+            event = label
+            break
 
-    protocol = flow_match.group(1).upper()
-    destination = flow_match.group(2).strip()
-    destination_port = flow_match.group(3).strip()
-    source_port = flow_match.group(4).strip()
+    # Error-level flow events explain themselves in the tail of the line; keep
+    # that text so the report says *why* the flow ended.
+    event_detail = ""
+    reason_match = re.search(r"closing due to reason:\s*(.+?)(?:\s+state=|\s*\|\s*$|$)", line, re.IGNORECASE)
+    if reason_match:
+        event_detail = reason_match.group(1).strip()
+    else:
+        failure_match = re.search(r"(failed:\s*.+?)(?:\s+state=|\s*\|\s*$|$)", line, re.IGNORECASE)
+        if failure_match:
+            event_detail = failure_match.group(1).strip()
+
     real_destination_ip_match = re.search(r"realDestIpAddr=([^\s]+)", line)
     real_destination_ip = real_destination_ip_match.group(1).strip() if real_destination_ip_match else ""
 
@@ -3051,6 +3103,8 @@ def parse_new_redirected_flow_line(line_text):
 
     return {
         "timestamp": timestamp_match.group(1),
+        "event": event,
+        "event_detail": event_detail,
         "protocol": protocol,
         "destination": destination,
         "destination_port": destination_port,
@@ -3066,6 +3120,28 @@ def parse_new_redirected_flow_line(line_text):
     }
 
 
+def zta_flow_target_matches(search_term, parsed_flow, raw_line=""):
+    """Lenient target matching: a bare name like `whatsapp` matches `api.whatsapp.net`."""
+    term = str(search_term or "").strip().lower().rstrip(".")
+    if not term:
+        return False
+
+    destination = str(parsed_flow.get("destination", "") or "").strip().lower().rstrip(".")
+    real_ip = str(parsed_flow.get("real_destination_ip", "") or "").strip().lower()
+
+    for candidate in (destination, real_ip):
+        if not candidate:
+            continue
+        if term == candidate or term in candidate:
+            return True
+        # `www.example.com` typed for a logged `example.com`, and vice versa.
+        if candidate.endswith("." + term) or term.endswith("." + candidate):
+            return True
+
+    return term in str(raw_line or "").lower()
+
+
+
 def find_spa_redirected_flows(
     root_dir,
     search_term,
@@ -3075,6 +3151,7 @@ def find_spa_redirected_flows(
 ):
     normalized_search_term = str(search_term).strip().lower()
     matches = []
+    fallback_matches = []
 
     if not normalized_search_term:
         return {
@@ -3089,17 +3166,22 @@ def find_spa_redirected_flows(
             with open(log_path, "r", encoding="utf-8", errors="ignore") as handle:
                 for line_number, raw_line in enumerate(handle, start=1):
                     line = raw_line.strip()
-                    if "new redirected flow:" not in line:
-                        continue
-                    if normalized_search_term not in line.lower():
+                    lowered_line = line.lower()
+                    if "destination [" not in lowered_line and not _ZTA_COMPACT_FLOW_RE.search(line):
                         continue
 
-                    parsed_line = parse_new_redirected_flow_line(line)
+                    parsed_line = parse_zta_flow_line(line)
                     if not parsed_line:
                         continue
 
+                    if not zta_flow_target_matches(normalized_search_term, parsed_line, line):
+                        continue
+
                     if destination_port_filter:
-                        if str(parsed_line.get("destination_port", "")).strip() != str(destination_port_filter).strip():
+                        parsed_destination_port = str(parsed_line.get("destination_port", "")).strip()
+                        if not parsed_destination_port:
+                            continue
+                        if parsed_destination_port != str(destination_port_filter).strip():
                             continue
 
                     parsed_line_time = parse_log_timestamp(parsed_line.get("timestamp", ""))
@@ -3110,9 +3192,18 @@ def find_spa_redirected_flows(
 
                     parsed_line["path"] = log_path
                     parsed_line["line_number"] = line_number
-                    matches.append(parsed_line)
+                    if parsed_line.get("event") == "new redirected flow":
+                        matches.append(parsed_line)
+                    else:
+                        fallback_matches.append(parsed_line)
         except OSError:
             continue
+
+    # Flow-creation records are the best source. When this bundle's log level
+    # never captured them, fall back to other events carrying the same fields
+    # (e.g. flow close) so the search still returns something usable.
+    if not matches:
+        matches = fallback_matches
 
     parsed_timestamps = [
         parse_log_timestamp(entry["timestamp"])
@@ -4850,6 +4941,21 @@ def build_zta_preview_signals(root_dir):
     enrollment_failure_lines = []
     completion_phrase = "Notifying enrollment completion with result:"
 
+    # Flows that ended in an error, grouped by destination, so the snapshot can
+    # flag which hosts actually broke rather than just how many flows there were.
+    flow_error_dest_counter = {}
+    flow_error_reason_counter = {}
+    flow_error_flows = set()
+    flow_error_total = 0
+    flow_error_first_time = ""
+    flow_error_last_time = ""
+    flow_error_line_re = re.compile(r"\bE/\s", re.IGNORECASE)
+
+    # Every distinct flow the log mentions, however it was recorded. Counting
+    # only "new redirected flow:" under-reports badly on bundles whose log level
+    # never captured flow creation.
+    observed_flow_keys = set()
+
     # Which authentication method the enrollment used. Detected with the same
     # logic as the detailed "Enrollment Failures" report so both always agree.
     enrollment_auth_method, enrollment_auth_method_label = detect_zta_enrollment_auth_method(root_dir)
@@ -4858,23 +4964,49 @@ def build_zta_preview_signals(root_dir):
         try:
             with open(log_path, "r", encoding="utf-8", errors="ignore") as handle:
                 for raw_line in handle:
-                    if "new redirected flow:" in raw_line:
-                        parsed_flow = parse_new_redirected_flow_line(raw_line)
-                        if parsed_flow:
+                    line = raw_line.strip()
+                    is_redirected_flow = "new redirected flow:" in line
+                    if is_redirected_flow or "destination [" in line.lower() or _ZTA_COMPACT_FLOW_RE.search(line):
+                        parsed_flow = parse_zta_flow_line(line)
+                    else:
+                        parsed_flow = None
+
+                    if parsed_flow:
+                        destination = str(parsed_flow.get("destination", "") or "").strip()
+                        source_port = str(parsed_flow.get("source_port", "") or "").strip()
+                        protocol = str(parsed_flow.get("protocol", "") or "").strip()
+                        flow_key = (protocol, destination, source_port)
+
+                        if destination and flow_key not in observed_flow_keys:
+                            observed_flow_keys.add(flow_key)
                             flow_count += 1
-                            if parsed_flow.get("protocol") == "TCP":
+                            if protocol == "TCP":
                                 tcp_count += 1
-                            elif parsed_flow.get("protocol") == "UDP":
+                            elif protocol == "UDP":
                                 udp_count += 1
-                            destination = str(parsed_flow.get("destination", "") or "").strip()
-                            if destination:
-                                dest_counter[destination] = dest_counter.get(destination, 0) + 1
-                            if len(flow_samples) < detail_sample_limit:
-                                flow_samples.append(
-                                    f"{parsed_flow.get('timestamp', '')} {parsed_flow.get('protocol', '')} "
-                                    f"{parsed_flow.get('destination', '')}:{parsed_flow.get('destination_port', '')}"
-                                    f" (process {parsed_flow.get('process_name', 'Unknown')})".strip()
-                                )
+                            dest_counter[destination] = dest_counter.get(destination, 0) + 1
+
+                        if is_redirected_flow and len(flow_samples) < detail_sample_limit:
+                            flow_samples.append(
+                                f"{parsed_flow.get('timestamp', '')} {protocol} "
+                                f"{destination}:{parsed_flow.get('destination_port', '')}"
+                                f" (process {parsed_flow.get('process_name', 'Unknown')})".strip()
+                            )
+
+                        if destination and flow_error_line_re.search(line):
+                            timestamp = str(parsed_flow.get("timestamp", "") or "").strip()
+                            reason = str(parsed_flow.get("event_detail", "") or "").strip()
+                            flow_error_total += 1
+                            flow_error_flows.add(flow_key)
+                            flow_error_dest_counter[destination] = flow_error_dest_counter.get(destination, 0) + 1
+                            if reason:
+                                flow_error_reason_counter[reason] = flow_error_reason_counter.get(reason, 0) + 1
+                            if timestamp:
+                                if not flow_error_first_time or timestamp < flow_error_first_time:
+                                    flow_error_first_time = timestamp
+                                if not flow_error_last_time or timestamp > flow_error_last_time:
+                                    flow_error_last_time = timestamp
+
                     if completion_phrase in raw_line:
                         enrollment_total += 1
                         result_text = raw_line.split(completion_phrase, 1)[1].strip()
@@ -5148,16 +5280,82 @@ def build_zta_preview_signals(root_dir):
             "groups": [],
         })
 
+    # Incomplete flows (top affected destinations).
+    if flow_error_total > 0:
+        top_error_destinations = sorted(
+            flow_error_dest_counter.items(), key=lambda item: item[1], reverse=True
+        )[:5]
+        error_groups = [{"label": dest, "count": count} for dest, count in top_error_destinations]
+
+        top_reason = ""
+        if flow_error_reason_counter:
+            top_reason = max(flow_error_reason_counter.items(), key=lambda item: item[1])[0]
+
+        affected_flow_count = len(flow_error_flows)
+        error_summary = (
+            f"{plural(affected_flow_count, 'flow')} to "
+            f"{plural(len(flow_error_dest_counter), 'destination')} ended with an error "
+            f"instead of closing cleanly."
+        )
+        if top_reason:
+            error_summary += f" Most common reason: {top_reason}."
+
+        # Errors to Secure Access infrastructure matter far more than errors to
+        # a third-party app, so say which kind this is.
+        infra_destinations = sorted(
+            dest for dest in flow_error_dest_counter
+            if "sse.cisco.com" in dest.lower() or "zpc.sse" in dest.lower()
+        )
+        if infra_destinations:
+            error_meaning = (
+                "Flows were torn down mid-transaction. Some of these are Secure Access "
+                f"infrastructure hosts ({', '.join(infra_destinations[:2])}), which points at the "
+                "tunnel or headend rather than the application."
+            )
+        else:
+            error_meaning = (
+                "Flows were torn down mid-transaction. All affected hosts are application "
+                "destinations, so this is more likely per-app behaviour than a tunnel fault."
+            )
+
+        error_metric = plural(len(flow_error_dest_counter), "destination")
+        if flow_error_first_time and flow_error_last_time:
+            error_metric += f" | {flow_error_first_time} -> {flow_error_last_time}"
+
+        assessment.append({
+            "label": "Incomplete Flows",
+            "severity": "warning",
+            "chip": plural(affected_flow_count, "flow"),
+            "metric": error_metric,
+            "summary": error_summary,
+            "meaning": error_meaning,
+            "impact": "Users may see slow loads, stalled uploads or dropped sessions for these destinations.",
+            "suggestions": [
+                "Start with the destination the user actually complained about, then work down this list.",
+                "Run Flow Analysis on that destination (a partial name such as `whatsapp` is enough) to list every affected source port.",
+                "Open the Visual Flow Analyzer for one source port to see the full transaction before the error.",
+                "Compare the time window above with the Server Connectivity and User Pause findings - overlapping windows point at the tunnel, not the app.",
+            ],
+            "group_kind": "destination",
+            "groups": error_groups,
+        })
+
     # Flows (informational).
     top_destinations = sorted(dest_counter.items(), key=lambda item: item[1], reverse=True)[:5]
     flow_groups = [{"label": dest, "count": count} for dest, count in top_destinations]
     if flow_count > 0:
+        flows_summary = (
+            f"{plural(flow_count, 'flow')} to {plural(len(dest_counter), 'destination')} "
+            f"were steered through Zero Trust Access."
+        )
+        if flow_error_flows:
+            flows_summary += f" {len(flow_error_flows)} of them ended with an error (see Incomplete Flows)."
         assessment.append({
             "label": "Flows",
             "severity": "info",
             "chip": plural(flow_count, "flow"),
             "metric": f"TCP {tcp_count} / UDP {udp_count}",
-            "summary": f"{plural(flow_count, 'flow')} were steered through Zero Trust Access.",
+            "summary": flows_summary,
             "meaning": "Private-app traffic was actively redirected through the ZTA tunnel.",
             "impact": "Confirms ZTA steering is functioning.",
             "group_kind": "destination",
@@ -7850,100 +8048,106 @@ def analyze():
                             target_type_text = flow_target_cached_config_evaluation.get("type") or "unknown"
                             mock_report += f"  - Target Type: {target_type_text}\n"
                             mock_report += (
-                                "  - Target is not present in the cached config "
-                                "(checked SPA and SIA steering configs).\n"
-                            )
-                            mock_report += "  - No matching logs found.\n"
-                        else:
-                            flow_results = find_spa_redirected_flows(
-                                temp_dir,
-                                spa_target_value,
-                                destination_port_filter=flow_filter_destination_port,
-                                timeframe_start=effective_flow_filter_start_dt,
-                                timeframe_end=effective_flow_filter_end_dt,
+                                "  - Note: target is not present in the cached config "
+                                "(checked SPA and SIA steering configs). Searching the ZTA logs anyway.\n"
                             )
 
-                            if flow_results["matches"]:
-                                if flow_results["timeframe_start"] and flow_results["timeframe_end"]:
-                                    mock_report += (
-                                        f"  - Timeframe: {flow_results['timeframe_start']} -> "
-                                        f"{flow_results['timeframe_end']}\n"
-                                    )
+                        flow_results = find_spa_redirected_flows(
+                            temp_dir,
+                            spa_target_value,
+                            destination_port_filter=flow_filter_destination_port,
+                            timeframe_start=effective_flow_filter_start_dt,
+                            timeframe_end=effective_flow_filter_end_dt,
+                        )
 
-                                for index, match in enumerate(flow_results["matches"], start=1):
-                                    mock_report += f"\n  - Match #{index}\n"
-                                    mock_report += f"    Time: {match['timestamp']}\n"
-                                    mock_report += (
-                                        f"    TCP/UDP Destination:Port: "
-                                        f"{match['protocol']} {match['destination']}:{match['destination_port']}\n"
-                                    )
-                                    if match['real_destination_ip']:
-                                        mock_report += f"    Real Destination IP: {match['real_destination_ip']}\n"
-                                    mock_report += f"    Source Port: {match['source_port']}\n"
-                                    mock_report += (
-                                        f"    Process: {match['process_name']} (PID {match['process_pid']})\n"
-                                    )
-                                    mock_report += f"    User: {match['process_user']}\n"
-                                    mock_report += (
-                                        f"    Parent Process: {match['parent_process_name']} "
-                                        f"(PID {match['parent_process_pid']})\n"
-                                    )
-                                    mock_report += f"    Parent User: {match['parent_process_user']}\n"
-                                    mock_report += f"    Match Rule Type: {match['match_rule_type']}\n"
+                        if flow_results["matches"]:
+                            if flow_results["timeframe_start"] and flow_results["timeframe_end"]:
+                                mock_report += (
+                                    f"  - Timeframe: {flow_results['timeframe_start']} -> "
+                                    f"{flow_results['timeframe_end']}\n"
+                                )
 
-                                    destination_evaluation = evaluate_spa_target_against_include_exclude(
-                                        match['destination'],
-                                        flow_cidr_include_rules,
-                                        flow_cidr_exclude_rules,
-                                        flow_fqdn_include_rules,
-                                        flow_fqdn_exclude_rules,
-                                        flow_dns_include_rules,
-                                        flow_dns_exclude_rules,
-                                    )
-                                    destination_match_result = destination_evaluation['classification']
-                                    if destination_match_result == 'no include/exclude match':
-                                        destination_match_result = 'resource does not exist in cached config'
+                            for index, match in enumerate(flow_results["matches"], start=1):
+                                mock_report += f"\n  - Match #{index}\n"
+                                mock_report += f"    Time: {match['timestamp']}\n"
+                                if match.get('event') and match['event'] != 'new redirected flow':
+                                    mock_report += f"    Log Event: {match['event']}\n"
+                                if match.get('event_detail'):
+                                    mock_report += f"    Log Detail: {match['event_detail']}\n"
+                                destination_with_port = match['destination']
+                                if match['destination_port']:
+                                    destination_with_port += f":{match['destination_port']}"
+                                mock_report += (
+                                    f"    TCP/UDP Destination:Port: "
+                                    f"{match['protocol']} {destination_with_port}\n"
+                                )
+                                if match['real_destination_ip']:
+                                    mock_report += f"    Real Destination IP: {match['real_destination_ip']}\n"
+                                mock_report += f"    Source Port: {match['source_port']}\n"
+                                mock_report += (
+                                    f"    Process: {match['process_name']} (PID {match['process_pid']})\n"
+                                )
+                                mock_report += f"    User: {match['process_user']}\n"
+                                mock_report += (
+                                    f"    Parent Process: {match['parent_process_name']} "
+                                    f"(PID {match['parent_process_pid']})\n"
+                                )
+                                mock_report += f"    Parent User: {match['parent_process_user']}\n"
+                                mock_report += f"    Match Rule Type: {match['match_rule_type']}\n"
+
+                                destination_evaluation = evaluate_spa_target_against_include_exclude(
+                                    match['destination'],
+                                    flow_cidr_include_rules,
+                                    flow_cidr_exclude_rules,
+                                    flow_fqdn_include_rules,
+                                    flow_fqdn_exclude_rules,
+                                    flow_dns_include_rules,
+                                    flow_dns_exclude_rules,
+                                )
+                                destination_match_result = destination_evaluation['classification']
+                                if destination_match_result == 'no include/exclude match':
+                                    destination_match_result = 'resource does not exist in cached config'
+                                mock_report += (
+                                    f"    Destination Cached Config Match: {destination_match_result}\n"
+                                )
+
+                            if flow_selected_src_port:
+                                matched_source_ports = {
+                                    str(match.get('source_port', '')).strip()
+                                    for match in flow_results["matches"]
+                                    if str(match.get('source_port', '')).strip()
+                                }
+                                selected_source_port = str(flow_selected_src_port).strip()
+
+                                mock_report += f"\n[Selected Flow Trace: srcPort={flow_selected_src_port}]\n"
+                                if selected_source_port and selected_source_port not in matched_source_ports:
+                                    mock_report += "  - No matching logs found.\n"
                                     mock_report += (
-                                        f"    Destination Cached Config Match: {destination_match_result}\n"
+                                        "  - Selected Source Port is not in current SPA flow matches. "
+                                        "Choose a Source Port from the Match list above.\n"
                                     )
-
-                                if flow_selected_src_port:
-                                    matched_source_ports = {
-                                        str(match.get('source_port', '')).strip()
-                                        for match in flow_results["matches"]
-                                        if str(match.get('source_port', '')).strip()
-                                    }
-                                    selected_source_port = str(flow_selected_src_port).strip()
-
-                                    mock_report += f"\n[Selected Flow Trace: srcPort={flow_selected_src_port}]\n"
-                                    if selected_source_port and selected_source_port not in matched_source_ports:
-                                        mock_report += "  - No matching logs found.\n"
-                                        mock_report += (
-                                            "  - Selected Source Port is not in current SPA flow matches. "
-                                            "Choose a Source Port from the Match list above.\n"
-                                        )
-                                    else:
-                                        trace_lines = find_zta_log_lines_by_source_port(
-                                            temp_dir,
-                                            flow_selected_src_port,
-                                        )
-                                        if trace_lines:
-                                            mock_report += f"  - Matched Lines: {len(trace_lines)}\n"
-                                            for entry in trace_lines:
-                                                relative_path = os.path.relpath(entry['path'], temp_dir)
-                                                mock_report += (
-                                                    f"  - {relative_path}:L{entry['line_number']}\n"
-                                                    f"    {entry['line']}\n"
-                                                )
-                                        else:
-                                            mock_report += "  - No matching logs found.\n"
                                 else:
-                                    mock_report += (
-                                        "\n  - Next Step: choose one flow Source Port from the matches above, "
-                                        "enter it in the Source Port field, and run again to trace all lines.\n"
+                                    trace_lines = find_zta_log_lines_by_source_port(
+                                        temp_dir,
+                                        flow_selected_src_port,
                                     )
+                                    if trace_lines:
+                                        mock_report += f"  - Matched Lines: {len(trace_lines)}\n"
+                                        for entry in trace_lines:
+                                            relative_path = os.path.relpath(entry['path'], temp_dir)
+                                            mock_report += (
+                                                f"  - {relative_path}:L{entry['line_number']}\n"
+                                                f"    {entry['line']}\n"
+                                            )
+                                    else:
+                                        mock_report += "  - No matching logs found.\n"
                             else:
-                                mock_report += "  - No matching logs found.\n"
+                                mock_report += (
+                                    "\n  - Next Step: choose one flow Source Port from the matches above, "
+                                    "enter it in the Source Port field, and run again to trace all lines.\n"
+                                )
+                        else:
+                            mock_report += "  - No matching logs found.\n"
 
                         if flow_parse_errors:
                             mock_report += f"\n[{active_flow_mode} Flow Parse Warnings]\n"

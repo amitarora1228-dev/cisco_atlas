@@ -755,6 +755,52 @@ def detect_auth_method_from_enrollment_choice_files(root_dir, known_org_ids=None
     return None
 
 
+def detect_zta_enrollment_auth_method(root_dir, known_org_ids=None):
+    """Decide whether ZTA enrollment used certificate- or SAML-based auth.
+
+    Single source of truth shared by the detailed "Enrollment Failures" report
+    and the ZTA Health Snapshot card, so both always agree. Returns a
+    ``("Cert" | "SAML" | "", label)`` tuple.
+    """
+    try:
+        cert_attempts = (extract_cert_auto_enrollment_trace(root_dir) or {}).get("attempts") or []
+    except Exception:
+        cert_attempts = []
+    try:
+        saml_attempts = (extract_saml_auto_enrollment_trace(root_dir) or {}).get("attempts") or []
+    except Exception:
+        saml_attempts = []
+
+    try:
+        filename_method = detect_auth_method_from_enrollment_choice_files(
+            root_dir,
+            known_org_ids=known_org_ids,
+        )
+    except Exception:
+        filename_method = None
+
+    if cert_attempts and not saml_attempts:
+        method = "Cert"
+    elif saml_attempts and not cert_attempts:
+        method = "SAML"
+    elif cert_attempts and saml_attempts:
+        if filename_method == "Cert-based Auth":
+            method = "Cert"
+        elif filename_method == "SAML-based Auth":
+            method = "SAML"
+        else:
+            method = "Cert" if len(cert_attempts) >= len(saml_attempts) else "SAML"
+    elif filename_method == "Cert-based Auth":
+        method = "Cert"
+    elif filename_method == "SAML-based Auth":
+        method = "SAML"
+    else:
+        method = ""
+
+    labels = {"Cert": "Certificate-based Auth", "SAML": "SAML-based Auth"}
+    return method, labels.get(method, "")
+
+
 def extract_org_ids_from_enrollments(root_dir):
     org_ids = []
     user_ids = []
@@ -4804,27 +4850,14 @@ def build_zta_preview_signals(root_dir):
     enrollment_failure_lines = []
     completion_phrase = "Notifying enrollment completion with result:"
 
-    # Heuristics to tell whether enrollment is SAML/SSO-based or
-    # certificate-based, so we can surface the matching remediation guide.
-    enrollment_saml_hits = 0
-    enrollment_cert_hits = 0
-    saml_marker_re = re.compile(
-        r"\bsaml\b|\bsso\b|\bidp\b|samlrequest|samlresponse|browser.?based|\bassertion\b|openid|oauth",
-        re.IGNORECASE,
-    )
-    cert_marker_re = re.compile(
-        r"\bscep\b|\bx509\b|\bcsr\b|pkcs|cert(?:ificate)?[-_ ]?(?:based|enroll)|client\s*certificate|device\s*certificate|certenroll",
-        re.IGNORECASE,
-    )
+    # Which authentication method the enrollment used. Detected with the same
+    # logic as the detailed "Enrollment Failures" report so both always agree.
+    enrollment_auth_method, enrollment_auth_method_label = detect_zta_enrollment_auth_method(root_dir)
 
     for log_path in zta_log_paths:
         try:
             with open(log_path, "r", encoding="utf-8", errors="ignore") as handle:
                 for raw_line in handle:
-                    if saml_marker_re.search(raw_line):
-                        enrollment_saml_hits += 1
-                    if cert_marker_re.search(raw_line):
-                        enrollment_cert_hits += 1
                     if "new redirected flow:" in raw_line:
                         parsed_flow = parse_new_redirected_flow_line(raw_line)
                         if parsed_flow:
@@ -4990,42 +5023,39 @@ def build_zta_preview_signals(root_dir):
     if enrollment_failures > 0:
         cert_enroll_suggestions = [
             {"heading": "Certificate-based enrollments"},
-            "Follow this guide: https://securitydocs.cisco.com/docs/csa/olh/121612.dita and https://www.cisco.com/c/en/us/support/docs/security/secure-access/225387-configure-secure-access-ztna-auto.html",
+            "Make sure the configuration is correct as per the following: https://securitydocs.cisco.com/docs/csa/olh/121612.dita and https://www.cisco.com/c/en/us/support/docs/security/secure-access/225387-configure-secure-access-ztna-auto.html",
             "Check and make sure Duo Desktop is installed and all Duo services are running. To collect Duo Desktop logs, see Duo Detailed Diagnostics: https://help.duo.com/s/article/5343?language=en_US and the Duo Support tool: https://help.duo.com/s/article/7686?language=en_US",
             "Try the latest Cisco Secure Client version if the current version is old.",
             "Check https://www.cisco.com/c/en/us/support/security/secure-access/products-tech-notes-list.html for any enrollment-based errors. If you are unable to find a match, the Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
         ]
         saml_enroll_suggestions = [
             {"heading": "SAML-based enrollments"},
-            "Follow this guide: https://securitydocs.cisco.com/docs/csa/olh/121613.dita",
+            "Make sure the configuration is correct as per the following: https://securitydocs.cisco.com/docs/csa/olh/121613.dita",
             "Check and make sure Duo Desktop is installed and all Duo services are running. To collect Duo Desktop logs, see Duo Detailed Diagnostics: https://help.duo.com/s/article/5343?language=en_US and the Duo Support tool: https://help.duo.com/s/article/7686?language=en_US",
             "Try the latest Cisco Secure Client version if the current version is old.",
             "Check https://www.cisco.com/c/en/us/support/security/secure-access/products-tech-notes-list.html for any enrollment-based errors. If you are unable to find a match, the Cisco Endpoint Diagnostic tool (CEDT) can help collect logs and upload them to the case: https://www.cisco.com/c/en/us/support/docs/security/secure-access/226028-cisco-endpoint-diagnostics-tool-cedt.html",
         ]
-        if enrollment_cert_hits and not enrollment_saml_hits:
-            enrollment_auth_method = "cert"
-        elif enrollment_saml_hits and not enrollment_cert_hits:
-            enrollment_auth_method = "saml"
-        elif enrollment_cert_hits > enrollment_saml_hits:
-            enrollment_auth_method = "cert"
-        elif enrollment_saml_hits > enrollment_cert_hits:
-            enrollment_auth_method = "saml"
-        else:
-            enrollment_auth_method = "both"
-
-        if enrollment_auth_method == "cert":
+        if enrollment_auth_method == "Cert":
             enrollment_suggestions = list(cert_enroll_suggestions)
-        elif enrollment_auth_method == "saml":
+        elif enrollment_auth_method == "SAML":
             enrollment_suggestions = list(saml_enroll_suggestions)
         else:
             enrollment_suggestions = cert_enroll_suggestions + saml_enroll_suggestions
+
+        enrollment_summary = (
+            f"{enrollment_failures} of {enrollment_total} enrollment attempts reported an error."
+        )
+        if enrollment_auth_method_label:
+            enrollment_summary += f" Detected enrollment type: {enrollment_auth_method_label}."
 
         assessment.append({
             "label": "Enrollment",
             "severity": "critical",
             "chip": plural(enrollment_failures, "failure"),
             "metric": plural(enrollment_total, "attempt"),
-            "summary": f"{enrollment_failures} of {enrollment_total} enrollment attempts reported an error.",
+            "auth_method": enrollment_auth_method,
+            "auth_method_label": enrollment_auth_method_label,
+            "summary": enrollment_summary,
             "meaning": "The device could not fully enroll into Zero Trust Access.",
             "impact": "Private-app access through ZTA will not work until enrollment succeeds.",
             "suggestions": enrollment_suggestions,
@@ -5100,7 +5130,7 @@ def build_zta_preview_signals(root_dir):
                 "causes": connectivity_causes,
             },
             "suggestions": [
-                "Check the failing Flows above - repeatedly failing redirected flows can drive these server-connectivity events.",
+                "Run the detailed ZTA analysis and review the redirected flows around these timestamps - flows that repeatedly time out or reset can drive these server-connectivity events.",
                 "Verify the ZTA network requirements are met: allow *.ztna.sse.cisco.com, *.zpc.sse.cisco.com and *.tia.sse.cisco.com on 443 (TCP and UDP). See https://securitydocs.cisco.com/docs/csa/olh/118990.dita",
                 "Correlate the timestamps with network changes (Wi-Fi switch, VPN connect/disconnect, TND) to explain the reconnects.",
             ],
@@ -6204,40 +6234,17 @@ def analyze():
                 saml_trace = extract_saml_auto_enrollment_trace(temp_dir)
                 saml_attempts = saml_trace.get("attempts") or []
 
-                filename_method = detect_auth_method_from_enrollment_choice_files(
+                detected_method, detected_method_label = detect_zta_enrollment_auth_method(
                     temp_dir,
                     known_org_ids=known_org_ids,
                 )
 
-                if cert_attempts and not saml_attempts:
-                    detected_method = 'Cert'
-                elif saml_attempts and not cert_attempts:
-                    detected_method = 'SAML'
-                elif cert_attempts and saml_attempts:
-                    if filename_method == 'Cert-based Auth':
-                        detected_method = 'Cert'
-                    elif filename_method == 'SAML-based Auth':
-                        detected_method = 'SAML'
-                    else:
-                        detected_method = (
-                            'Cert' if len(cert_attempts) >= len(saml_attempts) else 'SAML'
-                        )
-                elif filename_method == 'SAML-based Auth':
-                    detected_method = 'SAML'
-                elif filename_method == 'Cert-based Auth':
-                    detected_method = 'Cert'
-                else:
-                    detected_method = ''
-
                 if detected_method == 'Cert':
                     detected_attempts = cert_attempts
-                    detected_method_label = 'Certificate-based Auth'
                 elif detected_method == 'SAML':
                     detected_attempts = saml_attempts
-                    detected_method_label = 'SAML-based Auth'
                 else:
                     detected_attempts = []
-                    detected_method_label = ''
 
                 if detected_attempts:
                     enrollment_flow_payload = {

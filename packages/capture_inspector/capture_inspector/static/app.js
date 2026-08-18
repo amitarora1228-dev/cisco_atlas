@@ -820,12 +820,43 @@ function buildRows(data) {
   return rows;
 }
 
+// Which traffic channel the table is pinned to, or null for all of them.
+let channelFilter = null;
+
+// DNS, web and QUIC answer different questions, and reading one of them means
+// reading it on its own. The order is the order traffic happens in: a name is
+// resolved before anything connects to it.
+const CHANNEL_ORDER = ["dns", "web", "quic", "other"];
+
+function renderChannelFilter(rows) {
+  const host = $("chan-filter");
+  if (!host) return;
+  const counts = {};
+  rows.forEach((r) => { counts[r.channel] = (counts[r.channel] || 0) + 1; });
+
+  const chips = CHANNEL_ORDER.filter((c) => counts[c]).map((c) => {
+    const m = CHANNEL_META[c];
+    const on = channelFilter === c;
+    return `<button type="button" class="chan-btn chan-${c}${on ? " on" : ""}"
+      data-chan="${c}" aria-pressed="${on}"
+      title="${esc(m.title)} — click to show only these, click again to clear"
+      >${esc(m.label)} <span class="chan-n">${counts[c]}</span></button>`;
+  });
+  // A lone channel is not a choice, so offering to filter by it would be noise.
+  host.innerHTML = chips.length > 1 ? chips.join("") : "";
+}
+
 function renderTable() {
   if (!lastData) return;
   const onlyProblems = $("only-problems").checked;
   const q = ($("flow-filter").value || "").toLowerCase().trim();
   const body = $("flow-body");
   let rows = buildRows(lastData);
+
+  // Counted before any filter so the chips keep saying how much traffic each
+  // channel carried, not how much survived the current view.
+  renderChannelFilter(rows);
+  if (channelFilter) rows = rows.filter((r) => r.channel === channelFilter);
 
   if (onlyProblems) rows = rows.filter((r) => r.problem);
   if (certsOnly)
@@ -840,7 +871,18 @@ function renderTable() {
 
   body.innerHTML = "";
   if (!rows.length) {
-    $("flow-empty").classList.remove("hidden");
+    // Say which filter emptied the table. The default text blames "only
+    // problems", which is simply wrong when a channel or a search did it.
+    const empty = $("flow-empty");
+    if (channelFilter && onlyProblems)
+      empty.textContent = `No problems on ${CHANNEL_META[channelFilter].label} flows.`;
+    else if (channelFilter)
+      empty.textContent = `No ${CHANNEL_META[channelFilter].label} flows match this search.`;
+    else if (q)
+      empty.textContent = "Nothing matches this search.";
+    else
+      empty.textContent = "No problems detected \u2014 toggle \u201cShow only problems\u201d off to see all healthy flows.";
+    empty.classList.remove("hidden");
     $("flow-table").classList.add("hidden");
     renderPager(0, 0, 0);
     return;
@@ -1711,6 +1753,13 @@ function blockInfoDetail(b) {
 
 // --- table filters ---
 $("only-problems").addEventListener("change", () => { flowPage = 0; renderTable(); });
+$("chan-filter").addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".chan-btn");
+  if (!btn) return;
+  channelFilter = channelFilter === btn.dataset.chan ? null : btn.dataset.chan;
+  flowPage = 0;
+  renderTable();
+});
 $("flow-filter").addEventListener("input", () => { flowPage = 0; renderTable(); });
 $("dns-only-flagged").addEventListener("change", () => {
   if (lastData && lastData.dns) renderDnsTable(lastData.dns.records);

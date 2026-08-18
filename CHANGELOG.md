@@ -35,6 +35,21 @@ under `[Unreleased]` until one is cut.
 
 ### Added
 
+- **The flow table can be pinned to one traffic channel.** Every flow already
+  carried a channel — DNS, WEB, QUIC or NET — and the badge was visible on each
+  row, but there was no way to act on it: the only filters were free text and
+  "show only problems". Reading a capture usually means reading one channel at a
+  time, so the channels are now buttons, each carrying its own count.
+
+  The counts are taken before any filter is applied, so they keep saying how
+  much traffic each channel carried rather than how much survived the current
+  view. A capture with a single channel shows no buttons at all, because
+  offering to filter by the only thing present is noise.
+
+  The empty-state text was wrong and is now specific. It blamed "show only
+  problems" whatever had actually emptied the table, so a search that matched
+  nothing produced a sentence about a toggle the reader had not touched.
+
 - **A DNS flow now says what it asked for and what came back.** It already
   carried a `DNS query` badge and then told you nothing: not the name, not the
   answer. The reason is worth recording, because it looks like an oversight and

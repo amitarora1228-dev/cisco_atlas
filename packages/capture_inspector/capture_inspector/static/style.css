@@ -807,6 +807,12 @@ button.ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Traffic-channel chips (DNS / Web / non-web) + loopback marker */
 .chan-chip { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px;
   font-size: 10px; font-weight: 700; letter-spacing: .03em; vertical-align: middle; }
+.chan-filter { display: flex; align-items: center; gap: 6px; }
+.chan-btn { padding: 3px 9px; border-radius: 7px; font: inherit; font-size: 11px; font-weight: 700;
+  letter-spacing: .03em; cursor: pointer; opacity: .62; transition: opacity .12s, box-shadow .12s; }
+.chan-btn:hover { opacity: 1; }
+.chan-btn.on { opacity: 1; box-shadow: 0 0 0 2px rgba(0, 0, 0, .10) inset; }
+.chan-n { font-weight: 600; opacity: .75; margin-left: 3px; }
 .chan-dns   { background: #eaf2fd; color: #1c63c4; border: 1px solid #aeccf3; } /* blue  = DNS */
 .chan-web   { background: #e6f7f1; color: #0a8f6b; border: 1px solid #9bdcc6; } /* green = web (inspectable) */
 .chan-quic  { background: #fde6e4; color: #c62f24; border: 1px solid #f2b3ad; } /* red   = QUIC (NOT intercepted) */

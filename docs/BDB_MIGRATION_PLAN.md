@@ -35,6 +35,7 @@ parser.
 | Custom JS/CSS | Full ES modules. Harbor UI kit at `scripts.cisco.com/harborui/<ver>/` |
 | Backend invocation | `POST /api/v2/jobs/<task>` (sync), `/async` + poll. Browser auth via same-origin `bdb_cookie` |
 | Session state | User session folder `/api/v2/files` — 10 GB/file, persists across runs, tasks address it via `subPath` |
+| File upload | `POST /api/v2/files{wildcard}`, `multipart/form-data`, 10 GB/file, up to 10 files per request |
 | TAC integration | `GET /api/v2/attachments/{srId}/{filename}` pulls a case attachment straight into the session folder |
 | Persistence | DBaaS (MongoDB, 256 MB), task storage (S3, `visibility=public`) |
 | Code sync | Every task has an auto-created GitHub repo. `GET /api/v2/pushpull/pull/{task}` syncs commits into BDB |
@@ -141,8 +142,19 @@ acceptable rather than discovering it mid-Phase-2.
 
 ## 9. Still unconfirmed
 
-* Maximum upload size for a browser-driven file upload. DART bundles and pcaps
-  run 50–500 MB; a hard cap below that makes chunked upload a workstream.
-* Job execution timeout.
+* Job execution timeout. dpkt's speed (§6) makes this unlikely to bite, but it is
+  not yet measured.
 * Whether the BDB task repo or the existing Atlas repo becomes the long-term
   home. Worth deciding deliberately, but not before the slice proves out.
+
+**Resolved 2026-08-24 — upload is not a risk.** `POST /api/v2/files{wildcard}`
+takes ordinary `multipart/form-data` with a **10 GB per-file limit**, against
+bundles and captures of 50–500 MB. No chunked-upload workstream is needed. Up
+to 10 files per request; folders are created as needed; a `.downloading` suffix
+marks a transfer in progress and a repeat upload of the same name within 10
+seconds is refused. Returns `204`.
+
+The browser flow is a plain `FormData` POST to the session folder, followed by a
+job invocation that addresses the file by `sub_path` — so the artefact is
+uploaded once and every later drill-down refers to it by path. That is better
+than the current in-memory LRU store, which evicts.

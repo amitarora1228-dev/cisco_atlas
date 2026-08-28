@@ -1,0 +1,1944 @@
+[
+  {
+    "capture": "NYC498-FTD4115-INETFW01-capture_csa1.pcap",
+    "flows": {
+      "tshark": 122,
+      "dpkt": 122,
+      "shared": 122
+    },
+    "only_tshark": [],
+    "only_dpkt": [],
+    "seconds": {
+      "tshark": 0.96,
+      "dpkt": 0.1
+    },
+    "fields": {
+      "src_ip": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "src_port": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "dst_ip": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "dst_port": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "packets": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "bytes": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "first_seen": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "last_seen": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "has_syn": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "isn": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "peer_isn": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "client_bytes": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "server_bytes": {
+        "tier": "1-headers",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "sni": {
+        "tier": "2-tls",
+        "match": 115,
+        "of": 122,
+        "pct": 94.3
+      },
+      "tls_version": {
+        "tier": "2-tls",
+        "match": 117,
+        "of": 122,
+        "pct": 95.9
+      },
+      "alpn": {
+        "tier": "2-tls",
+        "match": 116,
+        "of": 122,
+        "pct": 95.1
+      },
+      "handshake_seen": {
+        "tier": "2-tls",
+        "match": 120,
+        "of": 122,
+        "pct": 98.4
+      },
+      "tls_alerts": {
+        "tier": "2-tls",
+        "match": 119,
+        "of": 122,
+        "pct": 97.5
+      },
+      "retransmissions": {
+        "tier": "3-derived",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "duplicate_acks": {
+        "tier": "3-derived",
+        "match": 119,
+        "of": 122,
+        "pct": 97.5
+      },
+      "zero_windows": {
+        "tier": "3-derived",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "out_of_order": {
+        "tier": "3-derived",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "rtt_count": {
+        "tier": "3-derived",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "rtt_mean": {
+        "tier": "3-derived",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "handshake_rtt": {
+        "tier": "3-derived",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "http_methods": {
+        "tier": "4-http",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "http_statuses": {
+        "tier": "4-http",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      },
+      "first_uri": {
+        "tier": "4-http",
+        "match": 122,
+        "of": 122,
+        "pct": 100.0
+      }
+    },
+    "examples": {
+      "sni": [
+        {
+          "flow": "10.6.98.18:55821|69.192.21.137:443|4005726825",
+          "tshark": "fa000000174.resources.office.net",
+          "dpkt": null
+        },
+        {
+          "flow": "10.99.108.72:36806|104.208.181.159:443|2409046837",
+          "tshark": "citrixtelemetryeh-alias.servicebus.windows.net",
+          "dpkt": null
+        },
+        {
+          "flow": "10.99.120.5:53278|74.119.117.5:443|2654581853",
+          "tshark": "bidder.criteo.com",
+          "dpkt": null
+        }
+      ],
+      "tls_version": [
+        {
+          "flow": "10.99.108.72:36806|104.208.181.159:443|2409046837",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "10.99.114.17:65151|162.159.142.39:443|none",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "10.99.120.5:53278|74.119.117.5:443|2654581853",
+          "tshark": null,
+          "dpkt": "TLS 1.3"
+        }
+      ],
+      "alpn": [
+        {
+          "flow": "10.99.108.72:36806|104.208.181.159:443|2409046837",
+          "tshark": [
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "10.99.120.5:53278|74.119.117.5:443|2654581853",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "10.99.120.5:58980|74.119.117.5:443|3383637398",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        }
+      ],
+      "handshake_seen": [
+        {
+          "flow": "10.6.98.18:55820|69.192.21.137:443|none",
+          "tshark": [],
+          "dpkt": [
+            "serverkeyexchange"
+          ]
+        },
+        {
+          "flow": "10.99.114.17:65151|162.159.142.39:443|none",
+          "tshark": [
+            "serverhello",
+            "certificate",
+            "serverkeyexchange",
+            "serverhellodone",
+            "clientkeyexchange"
+          ],
+          "dpkt": [
+            "serverhello",
+            "clientkeyexchange"
+          ]
+        }
+      ],
+      "tls_alerts": [
+        {
+          "flow": "10.3.37.86:49955|17.253.97.201:443|none",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "10.99.114.17:51361|23.210.73.89:443|none",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "10.99.116.115:49703|104.18.39.111:443|none",
+          "tshark": [],
+          "dpkt": [
+            "alert",
+            "alert"
+          ]
+        }
+      ],
+      "duplicate_acks": [
+        {
+          "flow": "10.3.37.80:60326|206.247.5.181:443|none",
+          "tshark": 0,
+          "dpkt": 2
+        },
+        {
+          "flow": "10.3.38.40:64204|146.112.41.2:443|1056182645",
+          "tshark": 1,
+          "dpkt": 0
+        },
+        {
+          "flow": "10.99.132.67:61077|35.153.171.158:443|none",
+          "tshark": 0,
+          "dpkt": 1
+        }
+      ]
+    }
+  },
+  {
+    "capture": "NYC498-FTD4115-INETFW01-capture_thinclient1.pcap",
+    "flows": {
+      "tshark": 444,
+      "dpkt": 444,
+      "shared": 444
+    },
+    "only_tshark": [],
+    "only_dpkt": [],
+    "seconds": {
+      "tshark": 0.93,
+      "dpkt": 0.32
+    },
+    "fields": {
+      "src_ip": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "src_port": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "dst_ip": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "dst_port": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "packets": {
+        "tier": "1-headers",
+        "match": 440,
+        "of": 444,
+        "pct": 99.1
+      },
+      "bytes": {
+        "tier": "1-headers",
+        "match": 440,
+        "of": 444,
+        "pct": 99.1
+      },
+      "first_seen": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "last_seen": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "has_syn": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "isn": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "peer_isn": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "client_bytes": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "server_bytes": {
+        "tier": "1-headers",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "sni": {
+        "tier": "2-tls",
+        "match": 430,
+        "of": 444,
+        "pct": 96.8
+      },
+      "tls_version": {
+        "tier": "2-tls",
+        "match": 422,
+        "of": 444,
+        "pct": 95.0
+      },
+      "alpn": {
+        "tier": "2-tls",
+        "match": 433,
+        "of": 444,
+        "pct": 97.5
+      },
+      "handshake_seen": {
+        "tier": "2-tls",
+        "match": 433,
+        "of": 444,
+        "pct": 97.5
+      },
+      "tls_alerts": {
+        "tier": "2-tls",
+        "match": 439,
+        "of": 444,
+        "pct": 98.9
+      },
+      "retransmissions": {
+        "tier": "3-derived",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "duplicate_acks": {
+        "tier": "3-derived",
+        "match": 439,
+        "of": 444,
+        "pct": 98.9
+      },
+      "zero_windows": {
+        "tier": "3-derived",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "out_of_order": {
+        "tier": "3-derived",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "rtt_count": {
+        "tier": "3-derived",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "rtt_mean": {
+        "tier": "3-derived",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "handshake_rtt": {
+        "tier": "3-derived",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "http_methods": {
+        "tier": "4-http",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "http_statuses": {
+        "tier": "4-http",
+        "match": 444,
+        "of": 444,
+        "pct": 100.0
+      },
+      "first_uri": {
+        "tier": "4-http",
+        "match": 443,
+        "of": 444,
+        "pct": 99.8
+      }
+    },
+    "examples": {
+      "packets": [
+        {
+          "flow": "10.99.124.85:55449|54.225.88.226:443|2648248222",
+          "tshark": 2,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.99.124.85:55449|54.225.88.226:443|2648248223",
+          "tshark": 2,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.99.124.85:55451|54.225.88.226:443|2648248836",
+          "tshark": 2,
+          "dpkt": 1
+        }
+      ],
+      "bytes": [
+        {
+          "flow": "10.99.124.85:55449|54.225.88.226:443|2648248222",
+          "tshark": 144,
+          "dpkt": 58
+        },
+        {
+          "flow": "10.99.124.85:55449|54.225.88.226:443|2648248223",
+          "tshark": 144,
+          "dpkt": 58
+        },
+        {
+          "flow": "10.99.124.85:55451|54.225.88.226:443|2648248836",
+          "tshark": 144,
+          "dpkt": 58
+        }
+      ],
+      "sni": [
+        {
+          "flow": "10.99.124.133:52173|65.198.87.70:443|75082234",
+          "tshark": "support.1199nbf.net",
+          "dpkt": null
+        },
+        {
+          "flow": "10.99.124.185:50043|162.247.243.29:443|1907263413",
+          "tshark": "bam.nr-data.net",
+          "dpkt": null
+        },
+        {
+          "flow": "10.99.124.185:50235|162.247.243.29:443|3704513121",
+          "tshark": "bam.nr-data.net",
+          "dpkt": null
+        }
+      ],
+      "tls_version": [
+        {
+          "flow": "10.99.124.123:52240|3.229.98.228:443|3031410740",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "10.99.124.127:50347|3.229.98.228:443|2214809581",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "10.99.124.127:50349|3.229.98.228:443|874271844",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        }
+      ],
+      "alpn": [
+        {
+          "flow": "10.99.124.185:50043|162.247.243.29:443|1907263413",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "10.99.124.185:50235|162.247.243.29:443|3704513121",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "10.99.124.185:50980|13.32.241.97:443|2262145444",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        }
+      ],
+      "handshake_seen": [
+        {
+          "flow": "10.99.124.123:52240|3.229.98.228:443|3031410740",
+          "tshark": [],
+          "dpkt": [
+            "clienthello",
+            "serverhello"
+          ]
+        },
+        {
+          "flow": "10.99.124.127:50347|3.229.98.228:443|2214809581",
+          "tshark": [],
+          "dpkt": [
+            "clienthello",
+            "serverhello",
+            "clientkeyexchange"
+          ]
+        },
+        {
+          "flow": "10.99.124.127:50349|3.229.98.228:443|874271844",
+          "tshark": [],
+          "dpkt": [
+            "clienthello",
+            "serverhello",
+            "clientkeyexchange"
+          ]
+        }
+      ],
+      "tls_alerts": [
+        {
+          "flow": "10.99.124.133:52173|65.198.87.70:443|75082234",
+          "tshark": [],
+          "dpkt": [
+            "alert",
+            "alert"
+          ]
+        },
+        {
+          "flow": "10.99.124.49:49249|52.97.101.178:443|none",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "10.99.124.49:54105|52.97.101.178:443|none",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        }
+      ],
+      "duplicate_acks": [
+        {
+          "flow": "10.99.124.60:49783|65.198.87.70:443|none",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.99.124.7:65070|54.225.88.226:443|615654955",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.99.124.7:65071|54.225.88.226:443|2061716709",
+          "tshark": 0,
+          "dpkt": 1
+        }
+      ],
+      "first_uri": [
+        {
+          "flow": "10.99.124.133:52172|3.229.98.228:80|583825854",
+          "tshark": "http://edge.microsoft.com/browsernetworktime/time/1/current?cup2key=2:msnPUTgu3CpS-ObMUTELpkGehxSpDJCXm2LmIHT3Pkc&cup2hreq=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dpkt": "/browsernetworktime/time/1/current?cup2key=2:msnPUTgu3CpS-ObMUTELpkGehxSpDJCXm2LmIHT3Pkc&cup2hreq=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    }
+  },
+  {
+    "capture": "Pxgrid_Direct.pcap",
+    "flows": {
+      "tshark": 729,
+      "dpkt": 729,
+      "shared": 729
+    },
+    "only_tshark": [],
+    "only_dpkt": [],
+    "seconds": {
+      "tshark": 1.75,
+      "dpkt": 0.55
+    },
+    "fields": {
+      "src_ip": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "src_port": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "dst_ip": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "dst_port": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "packets": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "bytes": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "first_seen": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "last_seen": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "has_syn": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "isn": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "peer_isn": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "client_bytes": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "server_bytes": {
+        "tier": "1-headers",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "sni": {
+        "tier": "2-tls",
+        "match": 88,
+        "of": 729,
+        "pct": 12.1
+      },
+      "tls_version": {
+        "tier": "2-tls",
+        "match": 88,
+        "of": 729,
+        "pct": 12.1
+      },
+      "alpn": {
+        "tier": "2-tls",
+        "match": 694,
+        "of": 729,
+        "pct": 95.2
+      },
+      "handshake_seen": {
+        "tier": "2-tls",
+        "match": 198,
+        "of": 729,
+        "pct": 27.2
+      },
+      "tls_alerts": {
+        "tier": "2-tls",
+        "match": 84,
+        "of": 729,
+        "pct": 11.5
+      },
+      "retransmissions": {
+        "tier": "3-derived",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "duplicate_acks": {
+        "tier": "3-derived",
+        "match": 663,
+        "of": 729,
+        "pct": 90.9
+      },
+      "zero_windows": {
+        "tier": "3-derived",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "out_of_order": {
+        "tier": "3-derived",
+        "match": 721,
+        "of": 729,
+        "pct": 98.9
+      },
+      "rtt_count": {
+        "tier": "3-derived",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "rtt_mean": {
+        "tier": "3-derived",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "handshake_rtt": {
+        "tier": "3-derived",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "http_methods": {
+        "tier": "4-http",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "http_statuses": {
+        "tier": "4-http",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      },
+      "first_uri": {
+        "tier": "4-http",
+        "match": 729,
+        "of": 729,
+        "pct": 100.0
+      }
+    },
+    "examples": {
+      "sni": [
+        {
+          "flow": "171.145.0.134:51411|30.158.83.4:443|3578810152",
+          "tshark": "usvarch1urpan01",
+          "dpkt": null
+        },
+        {
+          "flow": "171.145.0.134:54810|30.158.83.4:443|349201381",
+          "tshark": "usvarch1urpan01",
+          "dpkt": null
+        },
+        {
+          "flow": "171.145.0.134:56938|30.158.83.4:443|2922955022",
+          "tshark": "usvarch1urpan01",
+          "dpkt": null
+        }
+      ],
+      "tls_version": [
+        {
+          "flow": "171.145.0.134:51411|30.158.83.4:443|3578810152",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "171.145.0.134:54810|30.158.83.4:443|349201381",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "171.145.0.134:56938|30.158.83.4:443|2922955022",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        }
+      ],
+      "alpn": [
+        {
+          "flow": "171.145.0.134:51411|30.158.83.4:443|3578810152",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "171.145.0.134:54810|30.158.83.4:443|349201381",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "171.145.0.134:56938|30.158.83.4:443|2922955022",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        }
+      ],
+      "handshake_seen": [
+        {
+          "flow": "172.24.131.24:32768|30.158.83.4:8671|3525689803",
+          "tshark": [
+            "clienthello",
+            "serverhello",
+            "certificate",
+            "serverkeyexchange",
+            "serverhellodone"
+          ],
+          "dpkt": [
+            "clienthello",
+            "serverhello"
+          ]
+        },
+        {
+          "flow": "172.24.131.24:33016|30.158.83.4:8671|1531004039",
+          "tshark": [
+            "clienthello",
+            "serverhello",
+            "certificate",
+            "serverkeyexchange",
+            "serverhellodone"
+          ],
+          "dpkt": [
+            "clienthello",
+            "serverhello"
+          ]
+        },
+        {
+          "flow": "172.24.131.24:37138|30.158.83.4:443|3133481432",
+          "tshark": [
+            "clienthello",
+            "serverhello",
+            "certificate",
+            "serverkeyexchange",
+            "serverhellodone",
+            "clientkeyexchange"
+          ],
+          "dpkt": [
+            "clienthello",
+            "serverhello",
+            "clientkeyexchange"
+          ]
+        }
+      ],
+      "tls_alerts": [
+        {
+          "flow": "171.145.0.134:50336|30.158.83.4:443|none",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "171.145.0.134:51411|30.158.83.4:443|3578810152",
+          "tshark": [
+            "46"
+          ],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "171.145.0.134:56938|30.158.83.4:443|2922955022",
+          "tshark": [
+            "46"
+          ],
+          "dpkt": [
+            "alert"
+          ]
+        }
+      ],
+      "duplicate_acks": [
+        {
+          "flow": "171.145.0.134:50336|30.158.83.4:443|none",
+          "tshark": 0,
+          "dpkt": 2
+        },
+        {
+          "flow": "171.145.0.134:54810|30.158.83.4:443|349201381",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "171.145.0.134:59072|30.158.83.4:443|none",
+          "tshark": 0,
+          "dpkt": 2
+        }
+      ],
+      "out_of_order": [
+        {
+          "flow": "171.145.0.134:54810|30.158.83.4:443|349201381",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "171.145.0.134:59538|30.158.83.4:443|2899406185",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "171.145.0.134:61578|30.158.83.4:443|3458300786",
+          "tshark": 0,
+          "dpkt": 1
+        }
+      ]
+    }
+  },
+  {
+    "capture": "07242026-infoloxclient.pcapng",
+    "flows": {
+      "tshark": 421,
+      "dpkt": 421,
+      "shared": 421
+    },
+    "only_tshark": [],
+    "only_dpkt": [],
+    "seconds": {
+      "tshark": 1.72,
+      "dpkt": 0.68
+    },
+    "fields": {
+      "src_ip": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "src_port": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "dst_ip": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "dst_port": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "packets": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "bytes": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "first_seen": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "last_seen": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "has_syn": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "isn": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "peer_isn": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "client_bytes": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "server_bytes": {
+        "tier": "1-headers",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "sni": {
+        "tier": "2-tls",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "tls_version": {
+        "tier": "2-tls",
+        "match": 0,
+        "of": 421,
+        "pct": 0.0
+      },
+      "alpn": {
+        "tier": "2-tls",
+        "match": 217,
+        "of": 421,
+        "pct": 51.5
+      },
+      "handshake_seen": {
+        "tier": "2-tls",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "tls_alerts": {
+        "tier": "2-tls",
+        "match": 404,
+        "of": 421,
+        "pct": 96.0
+      },
+      "retransmissions": {
+        "tier": "3-derived",
+        "match": 352,
+        "of": 421,
+        "pct": 83.6
+      },
+      "duplicate_acks": {
+        "tier": "3-derived",
+        "match": 373,
+        "of": 421,
+        "pct": 88.6
+      },
+      "zero_windows": {
+        "tier": "3-derived",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "out_of_order": {
+        "tier": "3-derived",
+        "match": 413,
+        "of": 421,
+        "pct": 98.1
+      },
+      "rtt_count": {
+        "tier": "3-derived",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "rtt_mean": {
+        "tier": "3-derived",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "handshake_rtt": {
+        "tier": "3-derived",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "http_methods": {
+        "tier": "4-http",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "http_statuses": {
+        "tier": "4-http",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      },
+      "first_uri": {
+        "tier": "4-http",
+        "match": 421,
+        "of": 421,
+        "pct": 100.0
+      }
+    },
+    "examples": {
+      "tls_version": [
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:10039|3526038668",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:10229|1965045385",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:1024|4059699100",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        }
+      ],
+      "alpn": [
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:10039|3526038668",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:10229|1965045385",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:1024|4059699100",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        }
+      ],
+      "tls_alerts": [
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:1393|2291342786",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:14062|2704631166",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:23766|3472508862",
+          "tshark": [],
+          "dpkt": [
+            "alert",
+            "alert",
+            "alert",
+            "alert"
+          ]
+        }
+      ],
+      "retransmissions": [
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:10229|1965045385",
+          "tshark": 0,
+          "dpkt": 2
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:13280|1149157222",
+          "tshark": 3,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:15127|2423493898",
+          "tshark": 0,
+          "dpkt": 2
+        }
+      ],
+      "duplicate_acks": [
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:10229|1965045385",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:15127|2423493898",
+          "tshark": 0,
+          "dpkt": 1
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:18336|3119864179",
+          "tshark": 0,
+          "dpkt": 1
+        }
+      ],
+      "out_of_order": [
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:13280|1149157222",
+          "tshark": 12,
+          "dpkt": 14
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:23362|3692738382",
+          "tshark": 23,
+          "dpkt": 39
+        },
+        {
+          "flow": "10.128.24.20:443|10.30.21.178:23766|3472508862",
+          "tshark": 20,
+          "dpkt": 30
+        }
+      ]
+    }
+  },
+  {
+    "capture": "WhatsApp Issue 20260608 18_38 CET.pcapng",
+    "flows": {
+      "tshark": 584,
+      "dpkt": 419,
+      "shared": 418
+    },
+    "only_tshark": [
+      "127.0.0.1:4244|127.0.0.1:60445|2008452174",
+      "127.0.0.1:4244|127.0.0.1:60477|3202183273",
+      "127.0.0.1:4244|127.0.0.1:60495|1233908608",
+      "127.0.0.1:4244|127.0.0.1:60496|3933234615",
+      "127.0.0.1:4244|127.0.0.1:60497|2342239548"
+    ],
+    "only_dpkt": [
+      "172.20.10.2:60655|18.158.108.93:443|3936415986"
+    ],
+    "seconds": {
+      "tshark": 9.71,
+      "dpkt": 3.91
+    },
+    "fields": {
+      "src_ip": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "src_port": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "dst_ip": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "dst_port": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "packets": {
+        "tier": "1-headers",
+        "match": 393,
+        "of": 418,
+        "pct": 94.0
+      },
+      "bytes": {
+        "tier": "1-headers",
+        "match": 393,
+        "of": 418,
+        "pct": 94.0
+      },
+      "first_seen": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "last_seen": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "has_syn": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "isn": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "peer_isn": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "client_bytes": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "server_bytes": {
+        "tier": "1-headers",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "sni": {
+        "tier": "2-tls",
+        "match": 406,
+        "of": 418,
+        "pct": 97.1
+      },
+      "tls_version": {
+        "tier": "2-tls",
+        "match": 406,
+        "of": 418,
+        "pct": 97.1
+      },
+      "alpn": {
+        "tier": "2-tls",
+        "match": 406,
+        "of": 418,
+        "pct": 97.1
+      },
+      "handshake_seen": {
+        "tier": "2-tls",
+        "match": 416,
+        "of": 418,
+        "pct": 99.5
+      },
+      "tls_alerts": {
+        "tier": "2-tls",
+        "match": 414,
+        "of": 418,
+        "pct": 99.0
+      },
+      "retransmissions": {
+        "tier": "3-derived",
+        "match": 408,
+        "of": 418,
+        "pct": 97.6
+      },
+      "duplicate_acks": {
+        "tier": "3-derived",
+        "match": 363,
+        "of": 418,
+        "pct": 86.8
+      },
+      "zero_windows": {
+        "tier": "3-derived",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "out_of_order": {
+        "tier": "3-derived",
+        "match": 410,
+        "of": 418,
+        "pct": 98.1
+      },
+      "rtt_count": {
+        "tier": "3-derived",
+        "match": 414,
+        "of": 418,
+        "pct": 99.0
+      },
+      "rtt_mean": {
+        "tier": "3-derived",
+        "match": 417,
+        "of": 418,
+        "pct": 99.8
+      },
+      "handshake_rtt": {
+        "tier": "3-derived",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "http_methods": {
+        "tier": "4-http",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "http_statuses": {
+        "tier": "4-http",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      },
+      "first_uri": {
+        "tier": "4-http",
+        "match": 418,
+        "of": 418,
+        "pct": 100.0
+      }
+    },
+    "examples": {
+      "packets": [
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60452|3796735889",
+          "tshark": 8,
+          "dpkt": 7
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60453|3796735916",
+          "tshark": 8,
+          "dpkt": 7
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60456|3796795533",
+          "tshark": 2,
+          "dpkt": 1
+        }
+      ],
+      "bytes": [
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60452|3796735889",
+          "tshark": 478,
+          "dpkt": 396
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60453|3796735916",
+          "tshark": 478,
+          "dpkt": 396
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60456|3796795533",
+          "tshark": 144,
+          "dpkt": 58
+        }
+      ],
+      "sni": [
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60489|174968443",
+          "tshark": "api.sse.cisco.com",
+          "dpkt": null
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60588|3494174055",
+          "tshark": "api.sse.cisco.com",
+          "dpkt": null
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60676|2955303376",
+          "tshark": "api.sse.cisco.com",
+          "dpkt": null
+        }
+      ],
+      "tls_version": [
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60489|174968443",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60588|3494174055",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60676|2955303376",
+          "tshark": null,
+          "dpkt": "TLS 1.2"
+        }
+      ],
+      "alpn": [
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60489|174968443",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60588|3494174055",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60676|2955303376",
+          "tshark": [
+            "h2",
+            "http/1.1"
+          ],
+          "dpkt": []
+        }
+      ],
+      "handshake_seen": [
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60150|none",
+          "tshark": [],
+          "dpkt": [
+            "serverhellodone"
+          ]
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60271|none",
+          "tshark": [],
+          "dpkt": [
+            "certificate"
+          ]
+        }
+      ],
+      "tls_alerts": [
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60146|none",
+          "tshark": [],
+          "dpkt": [
+            "alert"
+          ]
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60150|none",
+          "tshark": [],
+          "dpkt": [
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert"
+          ]
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60271|none",
+          "tshark": [],
+          "dpkt": [
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert",
+            "alert"
+          ]
+        }
+      ],
+      "retransmissions": [
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60489|174968443",
+          "tshark": 2,
+          "dpkt": 4
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60588|3494174055",
+          "tshark": 0,
+          "dpkt": 2
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60676|2955303376",
+          "tshark": 2,
+          "dpkt": 4
+        }
+      ],
+      "duplicate_acks": [
+        {
+          "flow": "104.18.86.42:443|172.20.10.2:59782|none",
+          "tshark": 1,
+          "dpkt": 0
+        },
+        {
+          "flow": "13.248.210.21:443|172.20.10.2:59670|none",
+          "tshark": 0,
+          "dpkt": 32
+        },
+        {
+          "flow": "135.84.171.165:443|172.20.10.2:49585|none",
+          "tshark": 0,
+          "dpkt": 41
+        }
+      ],
+      "out_of_order": [
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60489|174968443",
+          "tshark": 2,
+          "dpkt": 0
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60588|3494174055",
+          "tshark": 2,
+          "dpkt": 0
+        },
+        {
+          "flow": "146.112.59.20:443|172.20.10.2:60676|2955303376",
+          "tshark": 2,
+          "dpkt": 0
+        }
+      ],
+      "rtt_count": [
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60150|none",
+          "tshark": 1026,
+          "dpkt": 1030
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60177|none",
+          "tshark": 13371,
+          "dpkt": 13459
+        },
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60271|none",
+          "tshark": 996,
+          "dpkt": 1029
+        }
+      ],
+      "rtt_mean": [
+        {
+          "flow": "15.160.80.72:443|172.20.10.2:60271|none",
+          "tshark": 0.15285392570281126,
+          "dpkt": 0.15751220046952585
+        }
+      ]
+    }
+  },
+  {
+    "capture": "63ebee08-8762-11f1-b729-0606aa1271ad-omaha-primary@2064867-672455400-sse.cisco.com-2064867-20260724-132136.pcap",
+    "flows": {
+      "tshark": 502,
+      "dpkt": 0,
+      "shared": 0
+    },
+    "only_tshark": [
+      "10.113.41.147,10.30.21.176:61047|10.218.10.164,10.128.24.96:53|none",
+      "10.113.41.147,10.30.28.106:51464|10.218.10.164,10.128.24.49:445|none",
+      "10.113.41.151,10.30.28.106:135|10.218.10.164,10.128.24.37:49188|1019011842",
+      "10.113.41.164,10.30.21.176:61048|10.218.10.164,10.128.24.96:53|none",
+      "10.113.41.164,10.30.21.179:54726|10.218.10.164,10.128.25.34:389|none"
+    ],
+    "only_dpkt": [],
+    "seconds": {
+      "tshark": 2.81,
+      "dpkt": 0.61
+    },
+    "fields": {
+      "src_ip": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "src_port": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "dst_ip": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "dst_port": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "packets": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "bytes": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "first_seen": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "last_seen": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "has_syn": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "isn": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "peer_isn": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "client_bytes": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "server_bytes": {
+        "tier": "1-headers",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "sni": {
+        "tier": "2-tls",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "tls_version": {
+        "tier": "2-tls",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "alpn": {
+        "tier": "2-tls",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "handshake_seen": {
+        "tier": "2-tls",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "tls_alerts": {
+        "tier": "2-tls",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "retransmissions": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "duplicate_acks": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "zero_windows": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "out_of_order": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "rtt_count": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "rtt_mean": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "handshake_rtt": {
+        "tier": "3-derived",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "http_methods": {
+        "tier": "4-http",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "http_statuses": {
+        "tier": "4-http",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      },
+      "first_uri": {
+        "tier": "4-http",
+        "match": 0,
+        "of": 0,
+        "pct": null
+      }
+    },
+    "examples": {}
+  }
+]

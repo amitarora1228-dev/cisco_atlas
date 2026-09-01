@@ -20,6 +20,38 @@ under `[Unreleased]` until one is cut.
 
 ### Changed
 
+- **The focused correlation is now the investigation an engineer actually does,
+  in order.** The previous version answered "what happened to this site" as three
+  panels side by side - what the browser saw, what the agent saw, what the wire
+  saw - which is still three tables on one screen. It never showed the thing that
+  makes the three a correlation rather than a coincidence: that each artefact
+  hands the next one its key.
+
+  It now runs as a chain. **1 · The HAR** names the hosts the page fetched from.
+  **2 · The ZTA log** turns those hosts into the **source ports** the agent used.
+  **3 · The capture** is searched for those ports. Every step states what it
+  hands over, so a step that hands over nothing explains every empty column
+  after it, and each connection is then listed once with all three columns
+  against it. The source port is the join because it is the only identifier all
+  three carry unchanged: the agent writes it, the capture sees it, and unlike an
+  address it is not rewritten in transit.
+
+  Running this on the bbc inputs immediately produced a finding the old layout
+  could not express: step 2 hands over 3 source ports (50046, 54644, 55249) and
+  step 3 finds **none** of them. Not a broken join - the agent's connections ran
+  17:19:55-17:49:15 and the capture spans 17:58:10-17:58:36. **The windows do not
+  overlap.** The report now says so, with both windows, and states that a capture
+  covering that period would close the gap. That is the difference between "the
+  tool shows nothing" and "these two artefacts cannot answer this, and here is
+  the one that would."
+
+  The chain is ordered worst-first, so the three failed ZTA flows - two to
+  `static.files.bbci.co.uk` closed on `socket_read`, one to
+  `sb.scorecardresearch.com` on `connect_timeout` - are the first three rows
+  rather than rows 40 to 42. Verified end to end in the browser against
+  `Logs/bbc.pcapng` + the bbc HAR + `DARTBundle_0810_1801.zip`: 42 connections
+  listed, 37 hosts in scope, all three steps rendered with their hand-offs.
+
 - **Correlation now answers a question instead of listing everything it saw.**
   Supplying a capture, a HAR and a bundle for `www.bbc.com` produced 47 hosts
   and 397 flows in undifferentiated tables, and nothing pointed at the host the

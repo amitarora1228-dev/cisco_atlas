@@ -1138,6 +1138,196 @@ def _matches_focus(candidate: str, focus: str) -> bool:
     return bool(host) and (host == focus or host.endswith("." + focus))
 
 
+def _connection_trace(
+    flows: list[FlowCorrelation], scope: list[HostCorrelation], sources: dict[str, str]
+) -> dict:
+    """Follow one site through the three artefacts, in the order an engineer does.
+
+    The browser says what was asked for. The agent says which connections it
+    made to serve it, and - the part that makes the rest possible - the
+    **source port** of each. The capture holds those ports. So the chain is not
+    three separate tables that happen to be on one screen: each step hands the
+    next one its key, and where a step cannot hand anything over, that is
+    reported rather than skipped.
+
+    The source port is the join because it is the only identifier all three can
+    carry: the agent writes it, the capture sees it, and it is not rewritten in
+    transit the way an address is.
+    """
+    requests_by_host = {entry.host: entry.requests for entry in scope}
+    steered = [f for f in flows if f.app is not None]
+    on_wire = [f for f in flows if f.wire is not None]
+    ports = sorted({f.src_port for f in steered})
+    matched_ports = sorted({f.src_port for f in steered if f.wire is not None})
+
+    # When step 2 hands over ports that step 3 cannot find, the usual reason is
+    # not that the join failed but that the two artefacts cover different
+    # minutes. Saying so turns an empty column into an answer, and tells the
+    # reader what to collect next.
+    def _span(times: list[datetime]) -> tuple[datetime, datetime] | None:
+        return (min(times), max(times)) if times else None
+
+    agent_span = _span(
+        [t for f in steered for t in (f.app.first_seen, f.app.last_seen) if t is not None]
+    )
+    wire_span = _span(
+        [t for f in on_wire for t in (f.wire.first_seen, f.wire.last_seen) if t is not None]
+    )
+    window_note = ""
+    if ports and not matched_ports and agent_span and wire_span:
+        overlaps = agent_span[0] <= wire_span[1] and wire_span[0] <= agent_span[1]
+        window_note = (
+            "The agent's connections to these hosts ran "
+            f"{agent_span[0].strftime('%H:%M:%S')}-{agent_span[1].strftime('%H:%M:%S')}, "
+            f"while the connections in this capture span "
+            f"{wire_span[0].strftime('%H:%M:%S')}-{wire_span[1].strftime('%H:%M:%S')}. "
+            + (
+                "The windows overlap, so the ports are genuinely absent rather than "
+                "out of frame."
+                if overlaps
+                else "The windows do not overlap: the capture was taken after those "
+                "connections had already happened, so no join to them is possible "
+                "from these inputs. A capture covering that period would close this."
+            )
+        )
+
+    steps = [
+        {
+            "n": 1,
+            "source": "har",
+            "title": "What the browser asked for",
+            "found": bool(requests_by_host) and "har" in sources,
+            "summary": (
+                f"{sum(len(r) for r in requests_by_host.values())} request(s) across "
+                f"{len(requests_by_host)} host(s)."
+                if "har" in sources
+                else "No HAR was supplied, so there is nothing to start from."
+            ),
+            "hands_over": (
+                f"{len(requests_by_host)} hostname(s) to look for"
+                if "har" in sources
+                else ""
+            ),
+        },
+        {
+            "n": 2,
+            "source": "bundle",
+            "title": "What the agent did with it",
+            "found": bool(steered),
+            "summary": (
+                f"The Zero Trust Access log names {len(steered)} connection(s) to these "
+                f"hosts, on source port(s) {', '.join(str(p) for p in ports[:8])}"
+                + (" and others." if len(ports) > 8 else ".")
+                if steered
+                else (
+                    "The agent's log names no connection to any of these hosts, so it "
+                    "hands no source port to the next step. It logs what it steers, so "
+                    "this traffic was not carried over Zero Trust Access."
+                    if "bundle" in sources
+                    else "No DART bundle was supplied, so no source port comes from here."
+                )
+            ),
+            "hands_over": f"{len(ports)} source port(s)" if steered else "",
+        },
+        {
+            "n": 3,
+            "source": "capture",
+            "title": "What the wire shows",
+            "found": bool(on_wire),
+            "summary": (
+                (
+                    f"{len(matched_ports)} of the agent's {len(ports)} source port(s) appear "
+                    f"in the capture. "
+                    if ports
+                    else ""
+                )
+                + f"{len(on_wire)} connection(s) here can be shown packet by packet."
+                + (" " + window_note if window_note else "")
+                if "capture" in sources
+                else "No packet capture was supplied, so nothing can be shown packet by packet."
+            ),
+            "hands_over": "",
+        },
+    ]
+
+    connections = []
+    # Worst first, then whatever the most artefacts agree on: a reader opening
+    # this has a complaint, not a survey.
+    order = {"problem": 0, "warning": 1, "info": 2}
+    for flow in sorted(
+        flows,
+        key=lambda f: (
+            order[f.severity],
+            -((f.app is not None) + (f.wire is not None)),
+            f.destination,
+            f.src_port,
+        ),
+    ):
+        app, wire = flow.app, flow.wire
+        requests = requests_by_host.get(flow.destination, [])
+        statuses: dict[str, int] = {}
+        for request in requests:
+            key = str(request.status) if request.status else "no response"
+            statuses[key] = statuses.get(key, 0) + 1
+
+        if app is not None and wire is not None:
+            outcome = "Followed through all three."
+        elif app is not None:
+            outcome = (
+                "The agent handled it, but no connection from this port is in the "
+                "capture - it happened outside the captured window."
+            )
+        elif wire is not None:
+            outcome = (
+                "The capture holds it and TLS named the host; the agent logged nothing "
+                "about it, which with trace logging off is not a verdict either way."
+            )
+        else:
+            outcome = "Named by the browser only."
+
+        reason = (app.reasons[0] if app is not None and app.reasons else "")
+        if reason:
+            outcome = f"Ended on {reason}. " + outcome
+
+        connections.append({
+            "src_port": flow.src_port,
+            "host": flow.destination,
+            "severity": flow.severity,
+            "outcome": outcome,
+            "har": {
+                "requests": len(requests),
+                "statuses": statuses,
+                # The browser records a host, not a port, so a request cannot be
+                # tied to one connection when the host opened several.
+                "per_host": True,
+            },
+            "zta": None if app is None else {
+                "lines": app.lines,
+                "error_lines": app.error_lines,
+                "reasons": list(app.reasons),
+                "errors": list(app.errors)[:3],
+                "first_seen": _iso(app.first_seen),
+                "last_seen": _iso(app.last_seen),
+                "tunnel": flow.tunnel.label if flow.tunnel is not None else "",
+            },
+            "wire": None if wire is None else {
+                "label": wire.label,
+                "packets": wire.packets,
+                "bytes": wire.bytes,
+                "handshake_captured": wire.has_syn,
+                "tls_version": wire.tls_version or "",
+                "alerts": list(wire.tls_alerts),
+                "retransmissions": wire.retransmissions,
+                "zero_windows": wire.zero_windows,
+                "first_seen": _iso(wire.first_seen),
+                "rtt_ms": round(wire.handshake_rtt * 1000, 1) if wire.handshake_rtt else None,
+            },
+            "basis": [b for b in (flow.wire_basis, flow.tunnel_basis) if b],
+        })
+
+    return {"steps": steps, "connections": connections}
+
+
 def focus_report(session: SessionCorrelation, focus: str) -> dict | None:
     """Answer one question - what happened to this site - from all three sides.
 
@@ -1374,6 +1564,7 @@ def focus_report(session: SessionCorrelation, focus: str) -> dict | None:
         "sides": sides,
         "scope_hosts": sorted(scope_names),
         "breakdown": breakdown,
+        "trace": _connection_trace(flows, scope, session.sources),
         "host_count": len(scope),
         "flow_count": len(flows),
         "named_host_count": len(named),

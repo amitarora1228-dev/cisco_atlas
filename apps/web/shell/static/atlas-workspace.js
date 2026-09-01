@@ -1926,41 +1926,125 @@
         return copy;
     }
 
-    function focusBreakdown(focus) {
-        var rows = focus.breakdown || [];
-        if (rows.length < 2) return null;
-        var block = el("div", "atlas-corr-focus-hosts");
+    /* The three artefacts as a pipeline rather than a panel each.
+     *
+     * They are not independent opinions to be read side by side: the browser
+     * names the hosts, the agent turns a host into the source ports it used,
+     * and only those ports let the capture be searched. Showing what each step
+     * hands the next is what makes a gap legible - a step that hands over
+     * nothing explains every empty table after it. */
+    function focusSteps(trace) {
+        var wrap = el("div", "atlas-corr-steps");
+        (trace.steps || []).forEach(function (step, index) {
+            if (index) wrap.appendChild(el("div", "atlas-corr-step-arrow", "\u2192"));
+            var card = el("div", "atlas-corr-step is-" + (step.found ? "found" : "absent"));
+            var head = el("div", "atlas-corr-step-head");
+            head.appendChild(el("span", "atlas-corr-step-n", String(step.n)));
+            head.appendChild(el("span", "atlas-corr-step-title", step.title));
+            card.appendChild(head);
+            card.appendChild(el("span", "atlas-corr-step-src", SIDE_LABEL[step.source] || step.source));
+            card.appendChild(el("p", "atlas-corr-step-text", step.summary));
+            if (step.hands_over) {
+                card.appendChild(el(
+                    "p", "atlas-corr-step-hand", "\u2193 hands over " + step.hands_over
+                ));
+            }
+            wrap.appendChild(card);
+        });
+        return wrap;
+    }
+
+    function statusText(statuses) {
+        var codes = Object.keys(statuses || {});
+        if (!codes.length) return "\u2014";
+        return codes.map(function (c) { return c + "\u00d7" + statuses[c]; }).join(", ");
+    }
+
+    /* One row per connection, keyed by the source port - the only identifier
+     * all three artefacts carry unchanged. */
+    function focusChain(trace) {
+        var rows = trace.connections || [];
+        var block = el("div", "atlas-corr-chain");
+        block.appendChild(el("h4", null, "Every connection, followed through all three"));
         block.appendChild(el(
             "p",
             "atlas-corr-focus-note",
-            "Hosts the browser loaded for this page, worst first. \u201cZTA\u201d counts "
-                + "flows the agent's log names \u2014 a zero there means the host was not "
-                + "steered."
+            "Joined on the source port: the agent writes it, the capture sees it, and "
+                + "unlike an address it is not rewritten in transit. The browser records a "
+                + "host rather than a port, so its column describes the host, not the row."
         ));
+        if (!rows.length) {
+            block.appendChild(el(
+                "p", "atlas-corr-empty", "No connection to these hosts appears in any artefact."
+            ));
+            return block;
+        }
+
         var table = el("table", "atlas-corr-table");
         var head = el("tr");
-        ["Host", "Steering", "Requests", "Failed", "ZTA flows", "Errored"].forEach(function (n) {
-            head.appendChild(el("th", null, n));
-        });
+        [
+            "Source port", "Host", "1 · Browser", "2 · Agent (ZTA)", "3 · Wire", "Outcome"
+        ].forEach(function (name) { head.appendChild(el("th", null, name)); });
         table.appendChild(el("thead")).appendChild(head);
+
         var body = el("tbody");
         rows.forEach(function (row) {
-            var meta = STEERING[row.steering] || STEERING.unknown;
-            var tr = el("tr");
+            var tr = el("tr", "is-" + row.severity);
+            tr.appendChild(el("td", "atlas-corr-num", String(row.src_port)));
             tr.appendChild(el("td", "atlas-corr-host", row.host));
-            var badgeCell = el("td");
-            var badge = el("span", "atlas-corr-badge is-" + row.steering, meta.label);
-            badge.title = meta.hint;
-            badgeCell.appendChild(badge);
-            tr.appendChild(badgeCell);
-            tr.appendChild(el("td", "atlas-corr-num", String(row.requests)));
-            var failed = el("td", "atlas-corr-num", String(row.failures));
-            if (row.failures) failed.classList.add("is-warning");
-            tr.appendChild(failed);
-            tr.appendChild(el("td", "atlas-corr-num", String(row.agent_flows)));
-            var bad = el("td", "atlas-corr-num", String(row.problem_flows));
-            if (row.problem_flows) bad.classList.add("is-warning");
-            tr.appendChild(bad);
+
+            tr.appendChild(el(
+                "td",
+                "atlas-corr-cell",
+                row.har.requests
+                    ? row.har.requests + " req \u00b7 " + statusText(row.har.statuses)
+                    : "\u2014"
+            ));
+
+            var zta = el("td", "atlas-corr-cell");
+            if (!row.zta) {
+                zta.appendChild(el("span", "atlas-corr-none", "not in log"));
+            } else {
+                zta.appendChild(el(
+                    "span",
+                    null,
+                    row.zta.lines + " line(s)"
+                        + (row.zta.error_lines ? ", " + row.zta.error_lines + " error" : "")
+                ));
+                if (row.zta.reasons.length) {
+                    zta.appendChild(el("span", "atlas-corr-sub", row.zta.reasons.join(", ")));
+                }
+                if (row.zta.tunnel) {
+                    zta.appendChild(el("span", "atlas-corr-sub", "via " + row.zta.tunnel));
+                }
+            }
+            tr.appendChild(zta);
+
+            var wire = el("td", "atlas-corr-cell");
+            if (!row.wire) {
+                wire.appendChild(el("span", "atlas-corr-none", "not captured"));
+            } else {
+                wire.appendChild(el(
+                    "span", null, row.wire.packets + " pkt \u00b7 " + row.wire.label
+                ));
+                var extra = [];
+                if (row.wire.tls_version) extra.push(row.wire.tls_version);
+                if (row.wire.rtt_ms !== null && row.wire.rtt_ms !== undefined) {
+                    extra.push("RTT " + row.wire.rtt_ms + " ms");
+                }
+                if (row.wire.retransmissions) extra.push(row.wire.retransmissions + " retrans");
+                if (row.wire.alerts.length) extra.push("alert " + row.wire.alerts.join(", "));
+                if (!row.wire.handshake_captured) extra.push("handshake not captured");
+                if (extra.length) wire.appendChild(el("span", "atlas-corr-sub", extra.join(" \u00b7 ")));
+            }
+            tr.appendChild(wire);
+
+            var outcome = el("td", "atlas-corr-basis");
+            outcome.appendChild(el("span", null, row.outcome));
+            (row.basis || []).forEach(function (line) {
+                outcome.appendChild(el("span", "atlas-corr-sub", line));
+            });
+            tr.appendChild(outcome);
             body.appendChild(tr);
         });
         table.appendChild(body);
@@ -1982,18 +2066,10 @@
         ));
         block.appendChild(head);
 
-        var grid = el("div", "atlas-corr-focus-grid");
-        (focus.sides || []).forEach(function (side) {
-            var card = el("div", "atlas-corr-side is-" + (side.found ? "found" : "absent"));
-            card.appendChild(el("span", "atlas-corr-side-src", SIDE_LABEL[side.source] || side.source));
-            card.appendChild(el("p", "atlas-corr-side-text", side.summary));
-            if (side.detail) card.appendChild(el("p", "atlas-corr-side-detail", side.detail));
-            grid.appendChild(card);
-        });
-        block.appendChild(grid);
-
-        var breakdown = focusBreakdown(focus);
-        if (breakdown) block.appendChild(breakdown);
+        if (focus.trace) {
+            block.appendChild(focusSteps(focus.trace));
+            block.appendChild(focusChain(focus.trace));
+        }
 
         var bar = el("div", "atlas-corr-focus-bar");
         bar.appendChild(el(

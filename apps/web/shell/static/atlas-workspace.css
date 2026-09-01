@@ -699,6 +699,115 @@ body.atlas-workspace .layout {
     gap: 12px;
 }
 
+/* The three artefacts as a pipeline: each step hands the next one its key. */
+.atlas-corr-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.atlas-corr-step {
+    flex: 1 1 240px;
+    padding: 11px 13px;
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface-soft);
+    border-top: 3px solid var(--atlas-border);
+}
+
+.atlas-corr-step.is-found {
+    border-top-color: #10b981;
+}
+
+.atlas-corr-step.is-absent {
+    border-top-color: #94a3b8;
+}
+
+.atlas-corr-step-arrow {
+    align-self: center;
+    color: var(--atlas-text-subtle);
+    font-size: 18px;
+}
+
+.atlas-corr-step-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 3px;
+}
+
+.atlas-corr-step-n {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: var(--atlas-accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.atlas-corr-step-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-corr-step-src {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--atlas-text-subtle);
+}
+
+.atlas-corr-step-text {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--atlas-text);
+}
+
+.atlas-corr-step-hand {
+    margin: 6px 0 0;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--atlas-accent);
+}
+
+.atlas-corr-chain {
+    margin-top: 18px;
+}
+
+.atlas-corr-chain h4 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-corr-chain tr.is-problem td:first-child {
+    box-shadow: inset 3px 0 0 #ef4444;
+}
+
+.atlas-corr-chain tr.is-warning td:first-child {
+    box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+.atlas-corr-cell {
+    font-size: 12.5px;
+}
+
+.atlas-corr-cell .atlas-corr-sub {
+    display: block;
+}
+
+.atlas-corr-none {
+    color: var(--atlas-text-subtle);
+    font-style: italic;
+}
+
 .atlas-corr-side {
     padding: 11px 13px;
     border-radius: var(--atlas-radius-sm);

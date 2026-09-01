@@ -987,9 +987,11 @@
      * answer rather than refusing to run. Below two there is nothing to join
      * and a run would only produce notes.
      *
-     * The result is deliberately *not* shown here. Correlation finishes on its
-     * own schedule, and switching to it would bury whichever engine result the
-     * user is reading. The notice points at the rail instead. */
+     * The result is deliberately *not* shown here when the operator has not
+     * said what they are looking for: correlation finishes on its own
+     * schedule, and switching to it would bury whichever engine result they
+     * are reading. Naming an affected host changes that - it is a question,
+     * and the answer is worth being taken to. */
     function maybeCorrelate() {
         var files = correlationFiles();
         var names = [];
@@ -1001,9 +1003,12 @@
         // is reloaded, so "3 artefacts" can be true while the user believes
         // they supplied one. Naming them makes that visible instead of
         // puzzling.
+        var focus = focusHost();
         announce(
-            "Correlating " + names.join(" + ") + ". Open Correlation in the rail "
-                + "for what they say about each other."
+            focus
+                ? "Correlating " + names.join(" + ") + " for " + focus + "."
+                : "Correlating " + names.join(" + ") + ". Open Correlation in the rail "
+                    + "for what they say about each other."
         );
         startWork("the correlation");
         runCorrelation(correlateRun, correlateStatus, true);
@@ -1068,6 +1073,14 @@
             har: pick("#" + CAPTURE + " #har"),
             bundle: pick("#" + BUNDLE + " #dartFile")
         };
+    }
+
+    /* The host the operator came to ask about, taken from the same "Affected
+     * domain / SNI" box the capture engine already reads. Asking for it twice
+     * would let the two answers describe different hosts. */
+    function focusHost() {
+        var input = document.querySelector("#" + CAPTURE + " #domain");
+        return input ? input.value.trim() : "";
     }
 
     var STEERING = {
@@ -1865,6 +1878,150 @@
             + "</div><div class=\"lad-body\">" + rows + "</div></div></div>";
     }
 
+    /* ---- the focused answer ---------------------------------------------
+     *
+     * A correlation with no focus is a catalogue: every host every artefact
+     * saw, in one long table, with the one the operator came to ask about
+     * somewhere inside it. Naming a host turns the same evidence into an
+     * answer, so when one is named it is answered first and the tables below
+     * are scoped to it - with the full catalogue one click away, because
+     * hiding it would trade one wrong default for another.
+     */
+    var corrShowAll = false;
+
+    var SIDE_LABEL = {
+        capture: "On the wire (capture)",
+        har: "In the browser (HAR)",
+        bundle: "In the agent's log (DART bundle)"
+    };
+
+    function bareHost(name) {
+        var value = String(name || "").toLowerCase().trim();
+        if (!value) return "";
+        if (value.indexOf("://") >= 0) value = value.split("://")[1];
+        value = value.split("/")[0];
+        if ((value.match(/:/g) || []).length === 1) value = value.split(":")[0];
+        return value.replace(/\.+$/, "");
+    }
+
+    /* Filtering a copy, never the response. The report view and the run
+     * history read the same object, and they describe the whole session.
+     *
+     * The set of hosts in scope is decided server-side, from the HAR's own
+     * page grouping - so a page's third-party hosts stay in scope even though
+     * their names look unrelated. */
+    function scopedCorrelation(data) {
+        var focus = data.focus;
+        if (!focus || !focus.host || corrShowAll) return data;
+        var inScope = {};
+        (focus.scope_hosts || []).forEach(function (h) { inScope[bareHost(h)] = true; });
+        var copy = {};
+        Object.keys(data).forEach(function (key) { copy[key] = data[key]; });
+        copy.hosts = (data.hosts || []).filter(function (h) {
+            return inScope[bareHost(h.host)];
+        });
+        copy.flows = (data.flows || []).filter(function (f) {
+            return inScope[bareHost(f.destination)];
+        });
+        return copy;
+    }
+
+    function focusBreakdown(focus) {
+        var rows = focus.breakdown || [];
+        if (rows.length < 2) return null;
+        var block = el("div", "atlas-corr-focus-hosts");
+        block.appendChild(el(
+            "p",
+            "atlas-corr-focus-note",
+            "Hosts the browser loaded for this page, worst first. \u201cZTA\u201d counts "
+                + "flows the agent's log names \u2014 a zero there means the host was not "
+                + "steered."
+        ));
+        var table = el("table", "atlas-corr-table");
+        var head = el("tr");
+        ["Host", "Steering", "Requests", "Failed", "ZTA flows", "Errored"].forEach(function (n) {
+            head.appendChild(el("th", null, n));
+        });
+        table.appendChild(el("thead")).appendChild(head);
+        var body = el("tbody");
+        rows.forEach(function (row) {
+            var meta = STEERING[row.steering] || STEERING.unknown;
+            var tr = el("tr");
+            tr.appendChild(el("td", "atlas-corr-host", row.host));
+            var badgeCell = el("td");
+            var badge = el("span", "atlas-corr-badge is-" + row.steering, meta.label);
+            badge.title = meta.hint;
+            badgeCell.appendChild(badge);
+            tr.appendChild(badgeCell);
+            tr.appendChild(el("td", "atlas-corr-num", String(row.requests)));
+            var failed = el("td", "atlas-corr-num", String(row.failures));
+            if (row.failures) failed.classList.add("is-warning");
+            tr.appendChild(failed);
+            tr.appendChild(el("td", "atlas-corr-num", String(row.agent_flows)));
+            var bad = el("td", "atlas-corr-num", String(row.problem_flows));
+            if (row.problem_flows) bad.classList.add("is-warning");
+            tr.appendChild(bad);
+            body.appendChild(tr);
+        });
+        table.appendChild(body);
+        block.appendChild(table);
+        return block;
+    }
+
+    function correlateFocus(data) {
+        var focus = data.focus;
+        if (!focus || !focus.host) return null;
+
+        var block = el("section", "atlas-corr-focus");
+        var head = el("div", "atlas-corr-focus-head");
+        head.appendChild(el("h3", null, "What happened to " + (focus.subject || focus.host)));
+        head.appendChild(el(
+            "p",
+            "atlas-corr-focus-verdict" + (focus.answered ? "" : " is-empty"),
+            focus.verdict
+        ));
+        block.appendChild(head);
+
+        var grid = el("div", "atlas-corr-focus-grid");
+        (focus.sides || []).forEach(function (side) {
+            var card = el("div", "atlas-corr-side is-" + (side.found ? "found" : "absent"));
+            card.appendChild(el("span", "atlas-corr-side-src", SIDE_LABEL[side.source] || side.source));
+            card.appendChild(el("p", "atlas-corr-side-text", side.summary));
+            if (side.detail) card.appendChild(el("p", "atlas-corr-side-detail", side.detail));
+            grid.appendChild(card);
+        });
+        block.appendChild(grid);
+
+        var breakdown = focusBreakdown(focus);
+        if (breakdown) block.appendChild(breakdown);
+
+        var bar = el("div", "atlas-corr-focus-bar");
+        bar.appendChild(el(
+            "span",
+            "atlas-corr-focus-scope",
+            corrShowAll
+                ? "Showing every host and flow in the session."
+                : (focus.by_page
+                    ? "Scoped to the " + focus.host_count + " host(s) the browser loaded "
+                        + "for this page: " + focus.flow_count + " flow(s)."
+                    : "Scoped to this host: " + focus.host_count + " host row(s), "
+                        + focus.flow_count + " flow(s).")
+        ));
+        var toggle = el(
+            "button",
+            "atlas-corr-focus-toggle",
+            corrShowAll ? "Scope back to " + focus.host : "Show everything in the session"
+        );
+        toggle.type = "button";
+        toggle.addEventListener("click", function () {
+            corrShowAll = !corrShowAll;
+            renderCorrelation(data);
+        });
+        bar.appendChild(toggle);
+        block.appendChild(bar);
+        return block;
+    }
+
     function renderCorrelation(data) {
         var host = document.getElementById("atlas-corr-results");
         if (!host) return;
@@ -1872,8 +2029,11 @@
         host.appendChild(correlateSummary(data));
         var clock = correlateClock(data);
         if (clock) host.appendChild(clock);
-        host.appendChild(correlateFlows(data));
-        host.appendChild(correlateHosts(data));
+        var focus = correlateFocus(data);
+        if (focus) host.appendChild(focus);
+        var view = scopedCorrelation(data);
+        host.appendChild(correlateFlows(view));
+        host.appendChild(correlateHosts(view));
         host.appendChild(correlateTunnels(data));
         var notes = correlateNotes(data);
         if (notes) host.appendChild(notes);
@@ -1893,6 +2053,9 @@
         if (files.capture) form.append("capture", files.capture);
         if (files.har) form.append("har", files.har);
         if (files.bundle) form.append("bundle", files.bundle);
+        var focus = focusHost();
+        if (focus) form.append("focus", focus);
+        corrShowAll = false;
 
         button.disabled = true;
         status.textContent = "Correlating...";
@@ -1914,10 +2077,17 @@
                 renderReportView();
                 recordRun(data);
                 renderReportWorkspace();
-                // Said again on completion because the bundle engine clears the
-                // notice when its own results land, and a pointer the reader
-                // never saw is the same as no pointer.
-                if (notify) {
+                // Naming an affected host is a question, and the answer is
+                // here rather than in either engine's own view. Without a host
+                // the reader is browsing, so the view they are on is left
+                // alone and the notice points at the rail instead.
+                if (notify && data.focus && data.focus.host) {
+                    showEngine(CORRELATE);
+                    announce(
+                        "Correlation is ready for " + data.focus.host + ": "
+                            + data.focus.verdict
+                    );
+                } else if (notify) {
                     announce(
                         "Correlation is ready: " + (data.summary ? data.summary.hosts : 0)
                             + " host(s) from " + (supplied.join(" + ") || "no artefact")

@@ -20,8 +20,19 @@ __pycache__/
 *.pcap
 *.pcapng
 DARTLogs/
+Logs/
+docs/deck-img/
+# Built from docs/deck-img, so it embeds the same customer screenshots.
+ATLAS-Overview.pptx
 uploads/
 instance/
+
+# --- Credentials (NEVER commit) ---
+github
+github.pub
+*.pem
+id_rsa*
+id_ed25519*
 
 # --- Temp / scratch files ---
 .tmp_*.js

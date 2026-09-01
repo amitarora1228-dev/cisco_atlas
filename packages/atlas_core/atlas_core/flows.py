@@ -274,6 +274,14 @@ class WebRequest:
     started: datetime | None
     duration_ms: float | None
     bytes: int = 0
+    page: str | None = None
+    """The HAR page this request was loaded under.
+
+    A site is not a host. Opening one page pulls in scripts, images and
+    beacons from dozens of others, and the browser is the only artefact that
+    knows which of them belonged to that page. Keeping the grouping means a
+    question about a page can be answered as one, instead of being answered
+    about the single host that happens to share its name."""
 
     @property
     def failed(self) -> bool:
@@ -376,6 +384,8 @@ class SessionCorrelation:
     clock_offset_basis: str = ""
     notes: list[str] = field(default_factory=list)
     sources: dict[str, str] = field(default_factory=dict)
+    focus: str = ""
+    """The hostname the operator named as affected, if any. Scopes the report."""
 
     @property
     def steered_hosts(self) -> list[HostCorrelation]:
@@ -1002,13 +1012,26 @@ def _summarise_agent_line(line: str) -> str:
 
 
 def extract_web_requests(har_path: str) -> list[WebRequest]:
-    """Read the browser's own record of the session."""
+    """Read the browser's own record of the session.
+
+    Page membership is read from the HAR rather than guessed from hostnames.
+    ``www.bbc.com`` and ``static.files.bbci.co.uk`` share no domain, and no
+    string rule could tell that the second was loaded by the first - but the
+    browser recorded it, so the browser is asked.
+    """
     from urllib.parse import urlparse
 
     with open(har_path, encoding="utf-8", errors="replace") as handle:
         document = json.load(handle)
 
-    entries = document.get("log", {}).get("entries", []) or []
+    log = document.get("log", {}) or {}
+    page_urls: dict[str, str] = {}
+    for page in log.get("pages", []) or []:
+        page_id = page.get("id")
+        if page_id:
+            page_urls[str(page_id)] = str(page.get("title") or page.get("url") or "")
+
+    entries = log.get("entries", []) or []
     requests: list[WebRequest] = []
     for entry in entries:
         request = entry.get("request", {}) or {}
@@ -1039,6 +1062,7 @@ def extract_web_requests(har_path: str) -> list[WebRequest]:
                     float(entry["time"]) if isinstance(entry.get("time"), int | float) else None
                 ),
                 bytes=int(content.get("size") or 0),
+                page=page_urls.get(str(entry.get("pageref") or "")) or None,
             )
         )
     return requests
@@ -1086,6 +1110,274 @@ def unpack_bundle(bundle_path: str, work_dir: str) -> str:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat(timespec="milliseconds") if value else None
+
+
+def normalise_host(value: str) -> str:
+    """Reduce whatever was typed to a bare hostname.
+
+    Operators paste what they have: a URL, a host:port, a trailing dot from a
+    DNS tool. All three name the same host, and refusing to match them would
+    make the focus look broken rather than strict.
+    """
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    text = text.split("/", 1)[0]
+    if text.startswith("[") and "]" in text:  # bracketed IPv6 literal
+        text = text[1 : text.index("]")]
+    elif text.count(":") == 1:
+        text = text.split(":", 1)[0]
+    return text.rstrip(".")
+
+
+def _matches_focus(candidate: str, focus: str) -> bool:
+    """True when ``candidate`` names the focused host or something under it."""
+    host = normalise_host(candidate)
+    return bool(host) and (host == focus or host.endswith("." + focus))
+
+
+def focus_report(session: SessionCorrelation, focus: str) -> dict | None:
+    """Answer one question - what happened to this site - from all three sides.
+
+    Without this the correlation is a catalogue: everything every artefact saw,
+    in the order it was found, with the thing the operator actually came to ask
+    about somewhere in the middle. Naming it turns the same evidence into an
+    answer.
+
+    The unit of the answer is the **page**, not the hostname, because that is
+    what was asked about. Opening ``www.bbc.com`` fetches from a dozen other
+    hosts that share no domain with it, and reporting only the one host that
+    matches the string produces a technically correct answer - one request,
+    nothing on the wire - to a question nobody asked. Page membership is read
+    from the HAR's own page grouping, so it is recorded rather than inferred.
+
+    Every side reports even when it has nothing, because the absence is the
+    finding as often as the presence is. A host with browser requests and no
+    ZTA record was not steered - a fact about the configuration, not a gap in
+    the tool - and saying nothing there is what makes a working correlation
+    look broken.
+    """
+    host = normalise_host(focus)
+    if not host:
+        return None
+
+    named = [h for h in session.hosts if _matches_focus(h.host, host)]
+
+    # The page the operator named, as the browser recorded it. Matching on the
+    # page's own URL keeps this evidence-based: no guess is made about which
+    # hosts "belong" to a site.
+    page_names = {
+        request.page
+        for entry in session.hosts
+        for request in entry.requests
+        if request.page and _matches_focus(normalise_host(request.page), host)
+    }
+    if page_names:
+        scope = [
+            entry
+            for entry in session.hosts
+            if any(r.page in page_names for r in entry.requests)
+        ]
+    else:
+        scope = named
+
+    scope_names = {entry.host for entry in scope}
+    flows = [f for f in session.flows if normalise_host(f.destination) in scope_names]
+    subject = sorted(page_names)[0] if page_names else host
+    sides: list[dict] = []
+
+    # --- the wire ---------------------------------------------------------
+    local = sum(len(h.local_flows) for h in scope)
+    direct = sum(len(h.direct_flows) for h in scope)
+    if "capture" not in session.sources:
+        sides.append({
+            "source": "capture",
+            "found": False,
+            "summary": "No packet capture was supplied, so nothing was measured on the wire.",
+        })
+    elif local or direct:
+        parts = []
+        if local:
+            parts.append(f"{local} connection(s) reached the agent's local listener")
+        if direct:
+            peers = sorted({f.dst_ip for h in scope for f in h.direct_flows})
+            parts.append(f"{direct} went straight to {', '.join(peers[:3])}")
+        sides.append({
+            "source": "capture",
+            "found": True,
+            "summary": (
+                f"TLS handshakes were captured for {len([h for h in scope if h.local_flows or h.direct_flows])} "
+                f"of the {len(scope)} host(s) involved."
+            ),
+            "detail": "; ".join(parts),
+        })
+    else:
+        sides.append({
+            "source": "capture",
+            "found": False,
+            "summary": (
+                "The capture holds no TLS handshake naming any of these hosts. Either "
+                "they were reached outside the capture window, or the names were never "
+                "sent in the clear."
+            ),
+        })
+
+    # --- the browser ------------------------------------------------------
+    requests = sum(h.request_count for h in scope)
+    failures = sum(len(h.failures) for h in scope)
+    if "har" not in session.sources:
+        sides.append({
+            "source": "har",
+            "found": False,
+            "summary": "No HAR was supplied, so the browser's own account is missing.",
+        })
+    elif requests:
+        synthetic = sorted({ip for h in scope for ip in h.synthetic_ips})
+        detail = f"{failures} of them failed" if failures else "none of them failed"
+        if synthetic:
+            detail += (
+                f"; {len(synthetic)} of the addresses it recorded never appear on the "
+                "wire, so those connections were intercepted locally"
+            )
+        sides.append({
+            "source": "har",
+            "found": True,
+            "summary": (
+                f"The browser made {requests} request(s) to {len(scope)} host(s) "
+                f"while loading {subject}."
+            ),
+            "detail": detail,
+        })
+    else:
+        sides.append({
+            "source": "har",
+            "found": False,
+            "summary": f"The browser made no request to {host} in this HAR.",
+        })
+
+    # --- the agent --------------------------------------------------------
+    #
+    # This is the side the reader notices missing, so it never stays silent.
+    # The ZTA log records the flows the agent *intercepted*; a host the policy
+    # does not steer produces no line at all, and that is an answer.
+    agent_flows = [f for f in flows if f.app is not None]
+    problems = [f for f in agent_flows if f.severity == "problem"]
+    steered_total = sum(1 for f in session.flows if f.app is not None)
+    if "bundle" not in session.sources:
+        sides.append({
+            "source": "bundle",
+            "found": False,
+            "summary": "No DART bundle was supplied, so the agent's own account is missing.",
+        })
+    elif agent_flows:
+        named_hosts = sorted({normalise_host(f.destination) for f in agent_flows})
+        sides.append({
+            "source": "bundle",
+            "found": True,
+            "summary": (
+                f"The Zero Trust Access log records {len(agent_flows)} intercepted "
+                f"flow(s) to {len(named_hosts)} of these hosts."
+            ),
+            "detail": (
+                (f"{len(problems)} of them ended in an error. " if problems else "")
+                + "Steered: "
+                + ", ".join(named_hosts[:4])
+                + (" and others" if len(named_hosts) > 4 else "")
+            ),
+        })
+    elif steered_total:
+        sides.append({
+            "source": "bundle",
+            "found": False,
+            "summary": (
+                f"The Zero Trust Access log records {steered_total} intercepted flow(s), "
+                "none of them to these hosts."
+            ),
+            "detail": (
+                "The agent only logs what it steers, so this traffic was not carried "
+                "over Zero Trust Access. That is a statement about the steering policy, "
+                "not a missing record."
+            ),
+        })
+    else:
+        sides.append({
+            "source": "bundle",
+            "found": False,
+            "summary": (
+                "The bundle holds no intercepted-flow records at all, so it cannot say "
+                f"anything about {host}."
+            ),
+            "detail": (
+                "Either the Zero Trust Access log is absent from the bundle or the agent "
+                "steered nothing during the period it covers."
+            ),
+        })
+
+    answered = any(side["found"] for side in sides)
+    steered_hosts = [h for h in scope if h.steering is Steering.STEERED]
+    if not answered:
+        verdict = f"None of the supplied artefacts mentions {host}."
+    elif problems:
+        verdict = (
+            f"Loading {subject} touched {len(scope)} host(s); {len(problems)} steered "
+            "flow(s) ended in an error, and the agent's log names them."
+        )
+    elif agent_flows:
+        verdict = (
+            f"Loading {subject} touched {len(scope)} host(s); "
+            f"{len(steered_hosts)} were steered through Zero Trust Access and completed."
+        )
+    elif steered_hosts:
+        verdict = (
+            f"Loading {subject} touched {len(scope)} host(s); the wire shows "
+            f"{len(steered_hosts)} of them intercepted locally, but the bundle's log "
+            "does not name them."
+        )
+    else:
+        verdict = (
+            f"Loading {subject} touched {len(scope)} host(s); none of them was steered "
+            "through Zero Trust Access."
+        )
+
+    breakdown = sorted(
+        (
+            {
+                "host": entry.host,
+                "steering": entry.steering.value,
+                "requests": entry.request_count,
+                "failures": len(entry.failures),
+                "agent_flows": sum(
+                    1
+                    for f in agent_flows
+                    if normalise_host(f.destination) == normalise_host(entry.host)
+                ),
+                "problem_flows": sum(
+                    1
+                    for f in problems
+                    if normalise_host(f.destination) == normalise_host(entry.host)
+                ),
+            }
+            for entry in scope
+        ),
+        key=lambda row: (-row["problem_flows"], -row["agent_flows"], -row["requests"]),
+    )
+
+    return {
+        "host": host,
+        "requested": (focus or "").strip(),
+        "subject": subject,
+        "by_page": bool(page_names),
+        "answered": answered,
+        "verdict": verdict,
+        "sides": sides,
+        "scope_hosts": sorted(scope_names),
+        "breakdown": breakdown,
+        "host_count": len(scope),
+        "flow_count": len(flows),
+        "named_host_count": len(named),
+    }
 
 
 def as_payload(session: SessionCorrelation) -> dict:
@@ -1167,6 +1459,7 @@ def as_payload(session: SessionCorrelation) -> dict:
         "flows": [_flow_payload(flow, clusters, tunnel_wires) for flow in session.flows],
         "notes": session.notes,
         "sources": session.sources,
+        "focus": focus_report(session, session.focus),
     }
 
 

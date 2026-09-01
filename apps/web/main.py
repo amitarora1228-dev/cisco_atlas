@@ -210,6 +210,7 @@ async def correlate_session_upload(
     bundle: UploadFile | None = File(None),
     capture: UploadFile | None = File(None),
     har: UploadFile | None = File(None),
+    focus: str = Form(""),
 ) -> JSONResponse:
     """Join a DART bundle, a packet capture and a HAR into one account of a session.
 
@@ -217,6 +218,10 @@ async def correlate_session_upload(
     without all three would be useless in the common case where only two were
     collected. What cannot be answered from what was supplied is reported in
     ``notes`` rather than left as a gap the reader might mistake for health.
+
+    ``focus`` is the host the operator came to ask about. It scopes the report
+    without discarding anything: the full catalogue is still returned, and the
+    focused answer is computed alongside it.
 
     Uploads are written to a temporary directory that is deleted when the
     request finishes. Nothing is retained: a capture and a bundle together
@@ -296,6 +301,7 @@ async def correlate_session_upload(
 
         result = correlate_session(wire_flows, agent_flows, web_requests, app_flows)
         result.sources = sources
+        result.focus = focus
         result.notes = notes + result.notes
         return JSONResponse(as_payload(result))
     finally:

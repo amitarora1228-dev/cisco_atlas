@@ -664,6 +664,105 @@ body.atlas-workspace .layout {
     margin-top: 32px;
 }
 
+/* The focused answer. Severity is carried by a left border and one accent
+   colour, so a card that found nothing still reads as a finding rather than
+   as an error. */
+.atlas-corr-focus {
+    margin-top: 20px;
+    padding: 16px 18px;
+    border: 1px solid var(--atlas-border);
+    border-left: 4px solid var(--atlas-accent);
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface);
+}
+
+.atlas-corr-focus-head h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    color: var(--atlas-text-strong);
+}
+
+.atlas-corr-focus-verdict {
+    margin: 0 0 14px;
+    max-width: 82ch;
+    font-size: 14px;
+    color: var(--atlas-text);
+}
+
+.atlas-corr-focus-verdict.is-empty {
+    color: var(--atlas-text-muted);
+}
+
+.atlas-corr-focus-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.atlas-corr-side {
+    padding: 11px 13px;
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface-soft);
+    border-left: 3px solid var(--atlas-border);
+}
+
+.atlas-corr-side.is-found {
+    border-left-color: #10b981;
+}
+
+.atlas-corr-side.is-absent {
+    border-left-color: #94a3b8;
+}
+
+.atlas-corr-side-src {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--atlas-text-subtle);
+}
+
+.atlas-corr-side-text {
+    margin: 0;
+    font-size: 13px;
+    color: var(--atlas-text);
+}
+
+.atlas-corr-side-detail {
+    margin: 5px 0 0;
+    font-size: 12px;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-corr-focus-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.atlas-corr-focus-scope {
+    font-size: 12px;
+    color: var(--atlas-text-muted);
+}
+
+.atlas-corr-focus-toggle {
+    padding: 5px 11px;
+    border: 1px solid var(--atlas-border);
+    border-radius: var(--atlas-radius-sm);
+    background: var(--atlas-surface);
+    color: var(--atlas-accent);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.atlas-corr-focus-toggle:hover {
+    border-color: var(--atlas-accent);
+}
+
 .atlas-corr-block h3 {
     margin: 0 0 6px;
     font-size: 15px;

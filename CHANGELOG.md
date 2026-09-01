@@ -18,6 +18,59 @@ under `[Unreleased]` until one is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Correlation now answers a question instead of listing everything it saw.**
+  Supplying a capture, a HAR and a bundle for `www.bbc.com` produced 47 hosts
+  and 397 flows in undifferentiated tables, and nothing pointed at the host the
+  operator had already named in *Affected domain / SNI* - that box was read by
+  the capture engine and by nothing else. The reasonable reading of the result
+  was that correlation had no point: it showed everything, and the agent's side
+  of the very host being asked about appeared to be missing.
+
+  It was not missing. The ZTA log held three intercepted flows for that page and
+  all three had failed - two to `static.files.bbci.co.uk` closed on `socket_read`
+  and one to `sb.scorecardresearch.com` on `connect_timeout` - but they were
+  three rows among 397, under hostnames that share no domain with the one typed
+  in.
+
+  The affected domain is now sent to `/atlas/api/correlate` and answered first,
+  by all three artefacts at once: what the wire measured, what the browser
+  recorded, and what the agent logged. Each side reports even when it has
+  nothing, because the absence is the finding as often as the presence is - a
+  host with requests and no ZTA record was not steered, which is a fact about
+  the steering policy rather than a gap in the tool. On the bbc inputs the
+  scoped view is 37 hosts and 42 flows instead of 47 and 397, with the three
+  failed flows carried into the verdict.
+
+  **The unit of the answer is the page, not the hostname.** Matching only the
+  string typed in returned one browser request and nothing else - a technically
+  correct answer to a question nobody asked, since opening `www.bbc.com` fetches
+  from 37 hosts that mostly share no domain with it. Membership is read from the
+  HAR's own `pages`/`pageref` grouping, so `static.files.bbci.co.uk` is included
+  because the browser recorded that it was loaded by that page, not because a
+  string rule guessed it was related. Verified against
+  `Logs/bbc.pcapng` + the bbc HAR + `DARTBundle_0810_1801.zip`.
+
+- **A correlation run opens its own view when a host was named.** It previously
+  never did, so that finishing in the background would not bury whichever engine
+  result was being read. That still holds when no host is given. Naming one is a
+  question rather than browsing, so the answer is now shown: the workspace
+  switches to Correlation and the notice carries the verdict instead of pointing
+  at the rail. Verified end to end in the browser - three artefacts plus
+  `www.bbc.com`, one click on Analyze, and the Correlation view is active with
+  the focused answer at the top.
+
+### Security
+
+- **`.gitignore` now covers the private key and the customer artefacts sitting in
+  the working tree.** An SSH private key named `github`, packet captures and HAR
+  exports under `Logs/`, and screenshots under `docs/deck-img/` containing real
+  organisation IDs, user identities and internal hostnames were all untracked but
+  not ignored - one `git add -A` away from being published. They are now ignored
+  by name. Nothing that was already committed changed; this only removes the
+  chance of committing them by accident.
+
 ### Fixed
 
 - **`run.ps1` could not start ATLAS on a clean virtualenv.** The script probes

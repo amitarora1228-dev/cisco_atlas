@@ -1019,6 +1019,114 @@
         return lines.join(String.fromCharCode(10));
     }
 
+    // Universal ZTNA: one redirect episode as a client <-> enforcement-point
+    // sequence. Only stages the log actually recorded become events, so a stage
+    // that never ran is absent rather than drawn as a success.
+    function buildUztnaFlowModel(episode) {
+        if (!episode) { return null; }
+        const at = key => {
+            const idx = episode.stage_line && episode.stage_line[key];
+            return typeof idx === 'number' ? idx : -1;
+        };
+        const lines = Array.isArray(episode.lines) ? episode.lines : [];
+        const stampOf = idx => {
+            const raw = idx >= 0 && idx < lines.length ? lines[idx] : '';
+            const m = raw.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)/);
+            return m ? m[1] : '';
+        };
+        // The stage tag ties each arrow back to a dot in the ladder's stage strip.
+        const push = (events, key, stage, label, direction, error) => {
+            const idx = at(key);
+            events.push({
+                label: stage + ' \u00b7 ' + label,
+                stage,
+                direction,
+                error: !!error,
+                logIndex: idx,
+                timestamp: stampOf(idx),
+                raw: idx >= 0 && idx < lines.length ? lines[idx] : '',
+            });
+        };
+
+        const events = [];
+        const enforcement = episode.redirect_to || 'enforcement point';
+        push(events, 'intercept', 'INTERCEPT',
+            'Flow intercepted \u2014 ' + (episode.resource || 'resource') + ':' + (episode.resource_port || '443')
+            + ' matched ' + (episode.match_rule || 'a rule'), 'self', false);
+        if (episode.redirect_to) {
+            push(events, 'redirect', 'REDIRECT',
+                'Steered to local enforcement \u2014 ' + enforcement + ':' + (episode.redirect_port || '443'),
+                'self', false);
+        }
+        if (episode.dns_ip) {
+            push(events, 'dns', 'DNS', 'Resolved \u2014 ' + enforcement + ' \u2192 ' + episode.dns_ip, 'self', false);
+        }
+        if (episode.tcp) {
+            push(events, 'tcp', 'TCP', 'Connected \u2014 ' + episode.tcp, 'out', false);
+        }
+        if (episode.tls_server) {
+            push(events, 'tls', 'TLS',
+                'Transport prepared \u2014 server cert verify on, client identity '
+                + String(episode.client_identity || 'unknown').slice(0, 12), 'self', false);
+        }
+        if (episode.chain_len) {
+            push(events, 'chain', 'TLS', 'Server certificate presented \u2014 chain of ' + episode.chain_len, 'in', false);
+        }
+        if (episode.tls_error) {
+            push(events, 'tls_fail', 'TLS',
+                'Certificate rejected \u2014 ' + episode.tls_error
+                + (episode.tls_error_detail ? ' (' + episode.tls_error_detail + ')' : ''), 'self', true);
+        }
+        if (episode.tls_alert) {
+            push(events, 'alert', 'TLS', 'Alert sent \u2014 ' + episode.tls_alert, 'out', true);
+        }
+        if (episode.outcome === 'migration_abandoned') {
+            push(events, 'giveup', 'CONNECT', 'Access token never sent \u2014 tunnel not established', 'self', true);
+            push(events, 'close', 'ACCESS',
+                'Migration abandoned \u2014 application socket closed'
+                + (episode.close_reason ? ' (' + episode.close_reason + ')' : ''), 'self', true);
+        }
+
+        const destination = episode.resource || '';
+        // The shared sequence renderer draws a fixed-width actor box, so the peer
+        // label is shortened to the host part; the FQDN stays in the events and summary.
+        const shortHost = String(enforcement).split('.')[0] || enforcement;
+        const peerLabel = 'FTD \u00b7 ' + (shortHost.length > 18 ? shortHost.slice(0, 17) + '\u2026' : shortHost);
+        // The log is the source of truth for ordering: transport setup can precede
+        // the TCP connect, so stage order alone would draw the sequence wrong.
+        events.sort(function (a, b) {
+            if (a.logIndex < 0 || b.logIndex < 0) { return 0; }
+            return a.logIndex - b.logIndex;
+        });
+        return {
+            clientLabel: 'ZTA Client',
+            proxyLabel: peerLabel,
+            accessType: 'Universal ZTNA \u00b7 Local Enforcement',
+            destination,
+            realDestinationIp: episode.dns_ip || '',
+            process: episode.process || 'unknown',
+            srcPort: episode.src_port || '',
+            ruleType: episode.match_rule || '',
+            firstTime: episode.start || '',
+            lastTime: episode.end || '',
+            eventCount: events.length,
+            bothLabel: 'Application data',
+            summaryBits: [
+                'Source: ZTA Client (' + (episode.process || 'unknown') + ', srcPort ' + (episode.src_port || '?') + ')',
+                'Private resource: ' + (destination || 'unknown'),
+                'Enforcement point: ' + enforcement + (episode.dns_ip ? ' (' + episode.dns_ip + ')' : ''),
+                'Rule: ' + (episode.match_rule || 'unknown'),
+                episode.proxy_config ? 'Proxy config: ' + episode.proxy_config : '',
+                episode.start ? 'From: ' + episode.start : '',
+                episode.end ? 'To: ' + episode.end : '',
+                'Events: ' + events.length,
+            ].filter(Boolean),
+            endpoints: [],
+            events,
+            logLines: lines,
+        };
+    }
+
     window.DarthawkFlowUtils = {
         parseFlowCandidatesFromOutput,
         buildFlowVisualizerData,
@@ -1030,6 +1138,7 @@
         buildEnrollmentFlowModel,
         deriveSrvFlowEvent,
         buildSrvFlowModel,
+        buildUztnaFlowModel,
         sanitizeFilenamePart,
         triggerTextDownload,
         buildSessionFallbackLogText,

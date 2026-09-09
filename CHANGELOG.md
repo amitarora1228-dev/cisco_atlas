@@ -18,7 +18,149 @@ under `[Unreleased]` until one is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Universal ZTNA is now a real check, built on the one thing the client
+  actually shows.** uZTNA keeps policy evaluation in Secure Access and varies
+  only the data plane, so the client-side marker of local enforcement is a flow
+  redirected onto an FTD instead of the cloud proxy. `analyze_uztna_runtime()`
+  parses each redirect as a **migration episode** and
+  `build_uztna_summary_payload()` renders it as a **connection ladder**:
+  intercept, redirect, DNS, TCP, TLS/mTLS, CONNECT+token, resource access. Each
+  rung is marked from evidence only - `ok`, `fail`, `blocked` or `unknown` - so
+  a stage that never ran is never drawn as a success.
+
+  Measured on `DARTBundle_1222_1600`: **113 redirect episodes, 110 abandoned at
+  the TLS stage**, all with `NAME_MISMATCH`, against one enforcement point
+  (one FTD) and two resources. The same log records 7 successful
+  certificate verifications against the Secure Access cloud proxy, reported
+  alongside as an info card - the cloud path is unaffected, and saying so is what
+  makes the local failure meaningful.
+
+  The regexes were written against that log and validated before any of this was
+  wired in: 113 `buildRedirectMigrationSpec` starts, 113 redirects, 113
+  `giving up migration`, 107 episodes with all four transport stages captured.
+
+  **What it refuses to claim.** The certificate subject in the log is identical
+  to the name the client requested, so a hostname typo is ruled out - but the
+  agent never logs Subject
+  Alternative Names (0 occurrences of `subjectAltName`/`dNSName` in 27,109
+  lines). The likely explanation is a missing SAN, since Windows chain
+  validation ignores CN alone; the card says the SAN cannot be confirmed from
+  this bundle and asks for the certificate instead of asserting it. Likewise the
+  last two rungs record that firewall-side enforcement - SNI check, token
+  validation, Snort rule lookup - is not observable from a DART bundle at all.
+
+  Verified in the browser against the real bundle: verdict banner, three cards,
+  the three-link certificate chain, 25 rendered ladders of 113 with the first
+  expanded, and the raw output pane suppressed. One bug was caught that way and
+  fixed - the renderer initially called `appendTextWithLinks`, a `const` scoped
+  inside another function and invisible to a sibling, so the analysis died with
+  a `ReferenceError` alert; the UZTNA renderer now carries its own helper.
+
+- **UZTNA moved directly below ZTA in the module rail**, which is where it
+  belongs now that it reads ZTA data. The shell rail builds itself by iterating
+  `input[name=module]` in DOM order, so reordering the template was enough.
+
+- **The UZTNA view shows only Universal ZTNA.** The upload preview renders a ZTA
+  Health Snapshot, which stayed on screen under every module and buried the
+  UZTNA result under a page of unrelated ZTA findings. The snapshot signals are
+  now held in `lastZtaPreviewSignals` and drawn through
+  `syncZtaSummaryForModule()`, which suppresses them while UZTNA is selected and
+  restores them on the way back. Verified across the module list: snapshot
+  visible with no module, ZTA and VPN; hidden for UZTNA; visible again on return
+  to ZTA. After analysis the UZTNA view carries its verdict, cards and ladders
+  only - snapshot, raw output pane, TND, User Pause, Config Sync and Server
+  Connectivity are all suppressed.
+
+- **Local vs cloud enforcement is now read from the log instead of assumed.**
+  Every episode used to be stamped `"enforcement": "Local"` as a literal, which
+  was true for the bundle in hand and unverifiable in general - exactly the kind
+  of claim this project is not supposed to make. The agent prints the protocol
+  stack on both sides of a migration, so the answer is already in the log:
+  `buildRedirectMigrationSpec() existing protocol stack:` carries `layer:` lines
+  pointing at the cloud proxy, and `new protocol stack:` carries the headend the
+  client is migrating *to*. `_uztna_classify_enforcement()` reads the new
+  headend and reports Local or Cloud from that, with `Unknown` when neither a
+  headend nor a redirect target was recorded. Confirmed on `working-uZTNA.zip`:
+  113 of 113 episodes classified Local, existing headend
+  `proxy-<org>.zpc.sse.cisco.com`, new headend the FTD.
+
+- **The trusted-network fingerprint is checked against the cached config, and it
+  explains a bundle that otherwise looks empty.** Local enforcement needs the
+  network fingerprint to be *defined but not attached to a proxy config*. If it
+  is attached, the proxy config disconnects whenever the fingerprint matches,
+  the client stops intercepting traffic, and there is nothing left to redirect.
+  `analyze_uztna_tnd_binding()` parses
+  `enrollments/cached_configs/*.json` for `network_fingerprints[]` and for every
+  `proxy_configs[].conditional_actions[].match_network_fingerprints`, and
+  `build_uztna_tnd_card()` reports one of three states: bound with `disconnect`
+  (critical), defined and unbound (ok), or absent (info - a remote user does not
+  need it, and the redirect still happens).
+
+  The card is emitted in the **no-episode** branch as well, because a critical
+  binding is precisely the reason there are no episodes; that branch previously
+  returned "No Universal ZTNA redirect activity found", which reads like a clean
+  bundle. It now returns the actual cause.
+
+  Established by diffing two bundles from the same tenant. The only structural
+  difference between them is a twelve-line `conditional_actions` block:
+  `{action: disconnect, check_type: on_network, match_network_fingerprints:
+  [<id>]}`. Same fingerprint, same DNS servers, same resources, same proxy
+  server otherwise. The logs agree - the bundle carrying the block has **0**
+  redirects, **0** `buildRedirectMigrationSpec` calls, **30** `TND will
+  disconnect` decisions and **30** `is disconnecting due to: InactiveTnd`; the
+  bundle without it has **113** redirects and **0** of either.
+
+- **A redirected-flow filter.** `uztna_filter` is matched server-side across
+  resource, ports, process, user, rule type and enforcement point, so a bundle
+  with a hundred episodes can be narrowed to the one flow being discussed.
+  Verified: an FQDN substring -> 33, a source port -> 1, a process name -> 12,
+  an IP prefix -> 80, and an unmatched term -> 0, with the miss reported as a
+  filter miss rather than as an absence of UZTNA activity.
+
+- **Episodes are grouped by outcome, and each group draws a sequence diagram.**
+  113 near-identical ladders were unreadable, so flows that fail the same way at
+  the same stage collapse into one group - 113 rows became 4. Each group renders
+  the shared `renderFlowSequenceSvg` view, with stage tags on the arrows
+  (INTERCEPT, REDIRECT, TLS, DNS, TCP, CONNECT, ACCESS) and legends for both the
+  stage strip and the arrow directions. Clicking an arrow highlights the log
+  line behind it. Events are ordered by their position in the log rather than by
+  a fixed stage list, which surfaced a real detail: `EnableServerCertVerify`
+  genuinely precedes `tcp connect succeeded`, so the TLS context is prepared
+  before the transport exists and is labelled "TLS transport prepared" instead
+  of being drawn as an outbound step.
+
 ### Changed
+
+- **Selecting UZTNA no longer looks like a working analysis that found nothing.**
+  The module was accepted by the route and then matched none of the downstream
+  branches, every one of which tests `selected_module == 'ZTA'`, so the whole
+  response was a single line: `[+] Payload received: <filename>`. A reader
+  cannot tell that apart from an analysis that ran and had nothing to report -
+  the failure mode this project exists to avoid.
+
+  UZTNA now states that no UZTNA-specific check was run, and reports what is
+  actually in the bundle: the number of Zero Trust Access log files and the
+  enrollment ORG IDs found. It says plainly that those artefacts cannot
+  establish whether the endpoint was operating in Universal ZTNA mode, and
+  offers the ZTA module only when there is ZTA data to analyse. This is a
+  truthful placeholder, not an implementation.
+
+  Verified against three cases on a live server: `DARTLogs/Userpause.zip`
+  reports 1 Zero Trust Access log file and ORG ID 8195009 and offers the ZTA
+  module; a synthetic bundle containing only an Umbrella log reports
+  `none found` for both and correctly omits the ZTA suggestion; and the ZTA
+  module's own `Check User Pause Config` run against the same bundle is
+  unchanged, still returning the full pause trace.
+
+  **Not done, and blocked:** UZTNA detection itself. There is no UZTNA bundle in
+  `DARTLogs/` - all 8 are ZTA SPA/SIA - so any parser would be regexes guessed
+  against a log format nobody here has seen. Those fail silently and render as
+  "healthy". Universal ZTNA is understood to reuse the Zero Trust Access module
+  rather than emit its own artefacts, which means the eventual implementation is
+  likely a policy/enrollment-mode view over ZTA data rather than a new parser
+  tree; that has not been confirmed against a bundle.
 
 - **The focused correlation is now the investigation an engineer actually does,
   in order.** The previous version answered "what happened to this site" as three

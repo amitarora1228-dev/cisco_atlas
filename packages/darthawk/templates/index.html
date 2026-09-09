@@ -32,6 +32,12 @@
                         </label>
                     </div>
                     <div>
+                        <input type="radio" name="module" id="mod-uztna" value="UZTNA" class="hidden radio-custom">
+                        <label for="mod-uztna" class="dh-nav-item block text-left border border-slate-500 text-slate-300 rounded-lg px-4 py-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
+                            UZTNA
+                        </label>
+                    </div>
+                    <div>
                         <input type="radio" name="module" id="mod-vpn" value="VPN" class="hidden radio-custom">
                         <label for="mod-vpn" class="dh-nav-item block text-left border border-slate-500 text-slate-300 rounded-lg px-4 py-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
                             VPN
@@ -41,12 +47,6 @@
                         <input type="radio" name="module" id="mod-umbrella" value="Umbrella" class="hidden radio-custom">
                         <label for="mod-umbrella" class="dh-nav-item block text-left border border-slate-500 text-slate-300 rounded-lg px-4 py-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
                             Umbrella
-                        </label>
-                    </div>
-                    <div>
-                        <input type="radio" name="module" id="mod-uztna" value="UZTNA" class="hidden radio-custom">
-                        <label for="mod-uztna" class="dh-nav-item block text-left border border-slate-500 text-slate-300 rounded-lg px-4 py-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
-                            UZTNA
                         </label>
                     </div>
                     <div>
@@ -129,6 +129,19 @@
                             class="block w-full bg-black/20 rounded-lg border border-sky-500/30 p-3 text-sky-100" />
                     </div>
                     <p class="text-sky-200/70 text-sm mt-2">Use this to search Duo logs for posture keywords and show de-duplicated matching lines with timeframe.</p>
+                </div>
+            </div>
+
+            <div id="uztnaOptions" class="space-y-2 hidden">
+                <div class="border border-sky-500/20 rounded-lg p-4 bg-black/20">
+                    <label for="uztnaFlowFilterInput" class="block text-sky-300 font-bold tracking-wide text-sm mb-2">
+                        Flow Filter (Optional)
+                    </label>
+                    <div class="flex flex-col md:flex-row gap-3">
+                        <input id="uztnaFlowFilterInput" type="text" placeholder="example: an FQDN, an IP, a source port or a process name"
+                            class="block w-full bg-black/20 rounded-lg border border-sky-500/30 p-3 text-sky-100" />
+                    </div>
+                    <p class="text-sky-200/70 text-sm mt-2">Match on private resource (FQDN or IP), source port, process or enforcement point. Leave blank to analyse every redirected flow.</p>
                 </div>
             </div>
 
@@ -487,6 +500,18 @@
                 <div id="userPauseWarnings" class="hidden mt-3 rounded-lg border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-800"></div>
             </div>
             <div id="enrollmentAttemptsWrap" class="hidden mb-4 rounded-lg border border-sky-500/35 bg-black/35 p-4"></div>
+            <div id="uztnaSummaryWrap" class="hidden mb-4 rounded-lg border border-sky-500/35 bg-black/35 p-4">
+                <div class="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <h4 class="text-sky-300 font-bold tracking-wide text-sm uppercase">Universal ZTNA</h4>
+                        <p id="uztnaSummarySub" class="text-xs text-slate-400"></p>
+                    </div>
+                    <div id="uztnaSummaryHeadline" class="text-base text-sky-100/90 md:text-right"></div>
+                </div>
+                <div id="uztnaSummaryVerdict"></div>
+                <div id="uztnaSummaryCards" class="mt-4 flex flex-col"></div>
+                <div id="uztnaSummaryLadders" class="mt-4"></div>
+            </div>
             <div id="resultOutputPanel" class="bg-black/50 border border-sky-500/40 rounded-lg p-5">
                 <div class="result-header-actions mb-3 justify-end flex-wrap">
                     <button type="button" id="copyResultButton" class="border border-sky-500/40 text-sky-200 rounded-lg px-3 py-2 text-xs font-bold tracking-widest uppercase hover:bg-white/5 transition-all" aria-label="Copy result output" title="Copy result output">

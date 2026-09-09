@@ -4462,6 +4462,709 @@ def analyze_user_pause_runtime(root_dir):
     }
 
 
+# --- Universal ZTNA -----------------------------------------------------------
+# uZTNA keeps policy evaluation in Secure Access and varies only the data plane.
+# The client-visible marker of local enforcement is a redirect of an intercepted
+# flow onto a local enforcement point (FTD) instead of the cloud proxy, so each
+# redirect is parsed as one "migration episode" with an ordered set of stages.
+
+UZTNA_CLOUD_PROXY_HINT = "zpc.sse.cisco.com"
+
+_UZTNA_TS = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)"
+_UZTNA_RE_SPEC = re.compile(
+    _UZTNA_TS + r".*buildRedirectMigrationSpec\(\) existing protocol stack:.*?"
+    r"proxyConfigId=(?P<cfg>\S+)\s+TCP destination \[(?P<dest>[^\]]+)\]:(?P<dport>\d+)\s+srcPort=(?P<sport>\d+)"
+    r"(?:.*?process=<(?P<proc>[^|>]+)\|PID (?P<pid>\d+)\|user (?P<user>[^>]+)>)?"
+    r"(?:.*?matchRuleType=(?P<rule>\w+))?"
+)
+_UZTNA_RE_ENROLL = re.compile(r"enrollmentId=(\S+)")
+_UZTNA_RE_REDIR = re.compile(
+    _UZTNA_TS + r".*redirect to destination: TCP destination \[(?P<fqdn>[^\]]+)\]:(?P<port>\d+)"
+)
+_UZTNA_RE_DNS_Q = re.compile(_UZTNA_TS + r".*ConnectTransport\(\) resolving dns for (?P<name>\S+)")
+_UZTNA_RE_DNS_R = re.compile(
+    _UZTNA_TS + r".*handleDnsResolveComplete\(\) dns resolved; connecting to: (?P<ip>[\d.]+):(?P<port>\d+)"
+)
+_UZTNA_RE_TCP_OK = re.compile(
+    _UZTNA_TS + r".*tcp connect succeeded: (?P<src>[\d.]+):(?P<sport>\d+) -> (?P<dst>[\d.]+):(?P<dport>\d+)"
+)
+_UZTNA_RE_TLS_START = re.compile(
+    _UZTNA_TS + r".*EnableServerCertVerify\(\) enabling server cert verify for context tls serverName=(?P<name>\S+)"
+)
+_UZTNA_RE_IDENTITY = re.compile(r"using client identity=(?P<id>\S+)")
+_UZTNA_RE_CHAIN = re.compile(r"Peer certificate information: chainLen=(?P<n>\d+)")
+_UZTNA_RE_SUBJ = re.compile(r"^subject=(?P<s>\S+) issuer=(?P<i>\S+)")
+_UZTNA_RE_WINCERT = re.compile(r"WinCert::verifyChainPolicy\(\) (?P<msg>.+?)\s*$")
+_UZTNA_RE_UNTRUSTED = re.compile(r"Certificate chain is untrusted\.(?P<code>\S+)")
+_UZTNA_RE_VERIFY_FAIL = re.compile(r"certificate verification failed\.(?P<code>\S+)")
+_UZTNA_RE_ALERT = re.compile(r"TLS alert sent: (?P<alert>.+?)\s*$")
+_UZTNA_RE_SSL_ERR = re.compile(r"SSL_connect error: (?P<err>.+?)\s*$")
+_UZTNA_RE_H2 = re.compile(r"creating new transport for protocol=HTTP2 headend=TCP destination \[(?P<fqdn>[^\]]+)\]")
+_UZTNA_RE_GIVEUP = re.compile(_UZTNA_TS + r".*AppSocketTransport.*tcp:(?P<sport>\d+)__(?P<dest>\S+).*giving up migration")
+_UZTNA_RE_APPCLOSE = re.compile(
+    _UZTNA_TS + r".*AppSocketTransport::handleClose\(\) tcp:(?P<sport>\d+)__(?P<dest>\S+).*closing due to reason: (?P<reason>\S+)"
+)
+_UZTNA_RE_STACK_HDR = re.compile(r"buildRedirectMigrationSpec\(\) (?P<which>existing|new) protocol stack:")
+_UZTNA_RE_LAYER = re.compile(
+    r"^layer: protocol=(?P<proto>\w+) headend=TCP destination \[(?P<host>[^\]]+)\]:(?P<port>\d+)"
+)
+_UZTNA_RE_TND_DISCONNECT = re.compile(
+    _UZTNA_TS + r'.*TND will disconnect ProxyConfig "(?P<cfg>[^"]+)" due to condition: (?P<check>\w+): (?P<fp>[0-9a-fA-F-]+)'
+)
+_UZTNA_RE_TND_CONNECT = re.compile(_UZTNA_TS + r".*TND will connect ProxyConfig")
+_UZTNA_RE_TND_INACTIVE = re.compile(
+    _UZTNA_TS + r".*ProxyConfig '(?P<cfg>[^']+)' is disconnecting due to: (?P<reason>\w+)"
+)
+
+
+def _uztna_classify_enforcement(episode):
+    """Local vs cloud is decided by the headend of the stack the client migrates to."""
+    headend = episode.get("new_headend") or episode.get("redirect_to") or ""
+    host = headend.split(":")[0]
+    if not host:
+        return "Unknown"
+    return "Cloud" if UZTNA_CLOUD_PROXY_HINT in host else "Local"
+
+
+def _uztna_new_episode(match, line):
+    enrollment = _UZTNA_RE_ENROLL.search(line)
+    return {
+        "start": match.group(1),
+        "resource": match.group("dest"),
+        "resource_port": match.group("dport"),
+        "src_port": match.group("sport"),
+        "proxy_config": match.group("cfg"),
+        "process": match.group("proc"),
+        "pid": match.group("pid"),
+        "user": match.group("user"),
+        "match_rule": match.group("rule"),
+        "enrollment_id": enrollment.group(1) if enrollment else None,
+        "enforcement": None,
+        "existing_headend": None,
+        "new_headend": None,
+        "redirect_to": None,
+        "redirect_port": None,
+        "dns_name": None,
+        "dns_ip": None,
+        "tcp": None,
+        "http2": False,
+        "tls_server": None,
+        "client_identity": None,
+        "chain": [],
+        "chain_len": None,
+        "tls_error": None,
+        "tls_error_detail": None,
+        "tls_alert": None,
+        "ssl_error": None,
+        "outcome": None,
+        "close_reason": None,
+        "end": None,
+        "lines": [],
+        "stage_line": {},
+    }
+
+
+UZTNA_MAX_EPISODE_LINES = 400
+
+
+def _uztna_note_line(episode, key, line):
+    """Record the raw line behind a stage so the sequence view can highlight it."""
+    if len(episode["lines"]) < UZTNA_MAX_EPISODE_LINES:
+        episode["lines"].append(line.rstrip("\n"))
+        if key and key not in episode["stage_line"]:
+            episode["stage_line"][key] = len(episode["lines"]) - 1
+
+
+def analyze_uztna_runtime(root_dir):
+    """Parse Universal ZTNA redirect-migration episodes from the ZTA agent log."""
+    log_files = find_module_log_text_files(root_dir, "Zero Trust Access")
+    if not log_files:
+        return {"available": False, "reason": "No Zero Trust Access logs found in this bundle."}
+
+    episodes = []
+    cloud_verifications = 0
+    cloud_servers = set()
+    current = None
+    stack_mode = None
+    tnd = {
+        "connect_events": 0,
+        "disconnect_events": 0,
+        "inactive_tnd": 0,
+        "matched_fingerprints": set(),
+        "proxy_configs": set(),
+        "first_disconnect": None,
+        "last_disconnect": None,
+    }
+
+    for log_path in log_files:
+        try:
+            with open(log_path, "r", errors="replace") as handle:
+                for line in handle:
+                    spec = _UZTNA_RE_SPEC.search(line)
+                    if spec:
+                        current = _uztna_new_episode(spec, line)
+                        stack_mode = "existing"
+                        _uztna_note_line(current, "intercept", line)
+                        episodes.append(current)
+                        continue
+
+                    tnd_dis = _UZTNA_RE_TND_DISCONNECT.search(line)
+                    if tnd_dis:
+                        tnd["disconnect_events"] += 1
+                        tnd["matched_fingerprints"].add(tnd_dis.group("fp"))
+                        tnd["proxy_configs"].add(tnd_dis.group("cfg"))
+                        if not tnd["first_disconnect"]:
+                            tnd["first_disconnect"] = tnd_dis.group(1)
+                        tnd["last_disconnect"] = tnd_dis.group(1)
+                        continue
+                    if _UZTNA_RE_TND_CONNECT.search(line):
+                        tnd["connect_events"] += 1
+                        continue
+                    tnd_inactive = _UZTNA_RE_TND_INACTIVE.search(line)
+                    if tnd_inactive and tnd_inactive.group("reason") == "InactiveTnd":
+                        tnd["inactive_tnd"] += 1
+                        continue
+
+                    tls_start = _UZTNA_RE_TLS_START.search(line)
+                    if tls_start and UZTNA_CLOUD_PROXY_HINT in tls_start.group("name"):
+                        cloud_verifications += 1
+                        cloud_servers.add(tls_start.group("name"))
+                        continue
+                    if current is None:
+                        continue
+                    _uztna_note_line(current, None, line)
+
+                    stack_hdr = _UZTNA_RE_STACK_HDR.search(line)
+                    if stack_hdr:
+                        stack_mode = stack_hdr.group("which")
+                        continue
+                    layer = _UZTNA_RE_LAYER.match(line.strip())
+                    if layer:
+                        host = layer.group("host")
+                        if stack_mode and host and host != "0.0.0.0":
+                            key = "existing_headend" if stack_mode == "existing" else "new_headend"
+                            if not current[key]:
+                                current[key] = "{}:{}".format(host, layer.group("port"))
+                        continue
+
+                    if tls_start:
+                        current["tls_server"] = tls_start.group("name")
+                        current["stage_line"].setdefault("tls", len(current["lines"]) - 1)
+                        continue
+
+                    match = _UZTNA_RE_REDIR.search(line)
+                    if match:
+                        current["redirect_to"] = match.group("fqdn")
+                        current["redirect_port"] = match.group("port")
+                        current["stage_line"].setdefault("redirect", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_H2.search(line)
+                    if match:
+                        current["http2"] = True
+                        continue
+                    match = _UZTNA_RE_DNS_Q.search(line)
+                    if match:
+                        current["dns_name"] = match.group("name")
+                        continue
+                    match = _UZTNA_RE_DNS_R.search(line)
+                    if match:
+                        current["dns_ip"] = match.group("ip")
+                        current["stage_line"].setdefault("dns", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_TCP_OK.search(line)
+                    if match:
+                        current["tcp"] = "{}:{} -> {}:{}".format(
+                            match.group("src"), match.group("sport"), match.group("dst"), match.group("dport")
+                        )
+                        current["stage_line"].setdefault("tcp", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_IDENTITY.search(line)
+                    if match and not current["client_identity"]:
+                        current["client_identity"] = match.group("id")
+                        continue
+                    match = _UZTNA_RE_CHAIN.search(line)
+                    if match:
+                        current["chain_len"] = int(match.group("n"))
+                        current["stage_line"].setdefault("chain", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_SUBJ.match(line.strip())
+                    if match and current["chain_len"] and len(current["chain"]) < current["chain_len"]:
+                        current["chain"].append({"subject": match.group("s"), "issuer": match.group("i")})
+                        continue
+                    match = _UZTNA_RE_WINCERT.search(line)
+                    if match and not current["tls_error_detail"]:
+                        current["tls_error_detail"] = match.group("msg")
+                        continue
+                    match = _UZTNA_RE_UNTRUSTED.search(line) or _UZTNA_RE_VERIFY_FAIL.search(line)
+                    if match:
+                        current["tls_error"] = match.group("code")
+                        current["stage_line"].setdefault("tls_fail", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_ALERT.search(line)
+                    if match and not current["tls_alert"]:
+                        current["tls_alert"] = match.group("alert")
+                        current["stage_line"].setdefault("alert", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_SSL_ERR.search(line)
+                    if match and not current["ssl_error"]:
+                        current["ssl_error"] = match.group("err")
+                        continue
+                    match = _UZTNA_RE_GIVEUP.search(line)
+                    if match and match.group("sport") == current["src_port"]:
+                        current["outcome"] = "migration_abandoned"
+                        current["stage_line"].setdefault("giveup", len(current["lines"]) - 1)
+                        continue
+                    match = _UZTNA_RE_APPCLOSE.search(line)
+                    if match and match.group("sport") == current["src_port"]:
+                        current["end"] = match.group(1)
+                        current["close_reason"] = match.group("reason")
+                        current["stage_line"].setdefault("close", len(current["lines"]) - 1)
+                        if not current["outcome"]:
+                            current["outcome"] = "closed"
+                        current = None
+                        stack_mode = None
+                        continue
+        except OSError:
+            continue
+
+    for episode in episodes:
+        episode["enforcement"] = _uztna_classify_enforcement(episode)
+        episode["ladder"] = build_uztna_ladder(episode)
+
+    return {
+        "available": True,
+        "episodes": episodes,
+        "cloud_verifications": cloud_verifications,
+        "cloud_servers": sorted(cloud_servers),
+        "tnd": {
+            "connect_events": tnd["connect_events"],
+            "disconnect_events": tnd["disconnect_events"],
+            "inactive_tnd": tnd["inactive_tnd"],
+            "matched_fingerprints": sorted(tnd["matched_fingerprints"]),
+            "proxy_configs": sorted(tnd["proxy_configs"]),
+            "first_disconnect": tnd["first_disconnect"],
+            "last_disconnect": tnd["last_disconnect"],
+        },
+    }
+
+
+def build_uztna_ladder(episode):
+    """Ordered client-side stages of one redirect episode, each marked from evidence only."""
+    resource = episode.get("resource") or "the private resource"
+    enforcement_point = episode.get("redirect_to")
+    failed_at_tls = bool(episode.get("tls_error") or episode.get("ssl_error"))
+
+    stages = [
+        {
+            "name": "Intercept",
+            "actor": "Secure Client",
+            "status": "ok",
+            "detail": "Flow to {}:{} matched a private-resource rule ({})".format(
+                resource, episode.get("resource_port") or "?", episode.get("match_rule") or "rule type unknown"
+            ),
+        },
+        {
+            "name": "Redirect",
+            "actor": "Secure Access",
+            "status": "ok" if enforcement_point else "unknown",
+            "detail": (
+                "Steered to local enforcement point {}:{}".format(enforcement_point, episode.get("redirect_port") or "443")
+                if enforcement_point
+                else "No redirect target recorded"
+            ),
+        },
+        {
+            "name": "DNS",
+            "actor": "Secure Client",
+            "status": "ok" if episode.get("dns_ip") else "unknown",
+            "detail": (
+                "{} resolved to {}".format(episode.get("dns_name") or enforcement_point, episode.get("dns_ip"))
+                if episode.get("dns_ip")
+                else "No resolution recorded"
+            ),
+        },
+        {
+            "name": "TCP",
+            "actor": "Secure Client",
+            "status": "ok" if episode.get("tcp") else "unknown",
+            "detail": episode.get("tcp") or "No TCP connect recorded",
+        },
+        {
+            "name": "TLS / mTLS",
+            "actor": "Secure Client -> FTD",
+            "status": "fail" if failed_at_tls else ("ok" if episode.get("tls_server") else "unknown"),
+            "detail": (
+                "{} - {}".format(episode.get("tls_error") or "handshake failed", episode.get("tls_error_detail") or episode.get("ssl_error"))
+                if failed_at_tls
+                else ("Server cert verified for {}".format(episode.get("tls_server")) if episode.get("tls_server") else "No TLS stage recorded")
+            ),
+        },
+        {
+            "name": "CONNECT + token",
+            "actor": "Secure Client -> FTD",
+            "status": "blocked" if failed_at_tls else ("ok" if episode.get("http2") else "unknown"),
+            "detail": (
+                "Never sent - the HTTP/2 tunnel was not established"
+                if failed_at_tls
+                else ("HTTP/2 transport created" if episode.get("http2") else "No HTTP/2 stage recorded")
+            ),
+        },
+        {
+            "name": "Resource access",
+            "actor": "FTD -> resource",
+            "status": "blocked" if episode.get("outcome") == "migration_abandoned" else "unknown",
+            "detail": (
+                "Migration abandoned; the application socket was closed ({})".format(episode.get("close_reason") or "no reason recorded")
+                if episode.get("outcome") == "migration_abandoned"
+                else "Not observable from a DART bundle"
+            ),
+        },
+    ]
+    return stages
+
+
+def episode_matches_uztna_filter(episode, needle):
+    """Match a redirect episode against a free-text term the user typed."""
+    if not needle:
+        return True
+    haystack = " ".join(
+        str(episode.get(field) or "")
+        for field in ("resource", "src_port", "process", "user", "redirect_to", "dns_ip", "proxy_config", "match_rule")
+    ).lower()
+    return needle in haystack
+
+
+def analyze_uztna_tnd_binding(root_dir):
+    """Read the ZTA cached config and report how network fingerprints are bound to proxy configs."""
+    paths = find_zta_cached_config_json_files(root_dir)
+    if not paths:
+        return {"available": False, "reason": "No ZTA cached configuration found in this bundle."}
+
+    fingerprints = {}
+    bindings = []
+    parsed = 0
+    for path in paths:
+        try:
+            with open(path, "r", errors="replace") as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        config = payload.get("ztnaConfig") if isinstance(payload, dict) else None
+        if not isinstance(config, dict):
+            continue
+        parsed += 1
+
+        for entry in config.get("network_fingerprints") or []:
+            if not isinstance(entry, dict) or not entry.get("id"):
+                continue
+            fingerprints.setdefault(entry["id"], {
+                "id": entry["id"],
+                "label": entry.get("label") or entry["id"],
+                "dns_servers": entry.get("match_dns_servers") or [],
+            })
+
+        for proxy in config.get("proxy_configs") or []:
+            if not isinstance(proxy, dict):
+                continue
+            for action in proxy.get("conditional_actions") or []:
+                if not isinstance(action, dict):
+                    continue
+                matched = action.get("match_network_fingerprints") or []
+                if not matched:
+                    continue
+                bindings.append({
+                    "proxy_config": proxy.get("id") or "unknown",
+                    "proxy_label": proxy.get("label") or proxy.get("id") or "unknown",
+                    "action": action.get("action") or "unknown",
+                    "check_type": action.get("check_type") or "unknown",
+                    "fingerprints": [str(value) for value in matched],
+                    "source": os.path.basename(path),
+                })
+
+    if not parsed:
+        return {"available": False, "reason": "ZTA cached configuration could not be parsed."}
+
+    return {
+        "available": True,
+        "config_count": parsed,
+        "fingerprints": list(fingerprints.values()),
+        "bindings": bindings,
+    }
+
+
+def build_uztna_tnd_card(binding, runtime):
+    """Whether the trusted-network fingerprint is in the state local enforcement requires."""
+    if not binding.get("available"):
+        return None
+
+    fingerprints = binding.get("fingerprints") or []
+    labels = {entry["id"]: entry["label"] for entry in fingerprints}
+    tnd = runtime.get("tnd") or {}
+    disconnects = tnd.get("disconnect_events", 0)
+    inactive = tnd.get("inactive_tnd", 0)
+
+    dns_servers = [server for entry in fingerprints for server in entry.get("dns_servers") or []]
+    if disconnects:
+        position = "endpoint matched the trusted network {} time(s)".format(disconnects)
+    elif fingerprints:
+        position = "no trusted-network match recorded in the logs"
+    else:
+        position = "{} cached config(s) read".format(binding.get("config_count", 0))
+    metric = "DNS {} | {}".format(", ".join(dns_servers), position) if dns_servers else position
+
+    groups = []
+    if disconnects:
+        groups.append({"label": "Trusted-network match disconnected the proxy config", "count": disconnects})
+    if inactive:
+        groups.append({"label": "Proxy config disconnected: InactiveTnd", "count": inactive})
+    if tnd.get("connect_events"):
+        groups.append({"label": "Trusted-network check kept the proxy config connected", "count": tnd["connect_events"]})
+
+    blocking = [
+        entry for entry in binding.get("bindings") or []
+        if str(entry.get("action", "")).lower() == "disconnect"
+    ]
+
+    if blocking:
+        entry = blocking[0]
+        bound = ", ".join(labels.get(fid, fid) for fid in entry.get("fingerprints") or []) or "a network fingerprint"
+        return {
+            "label": "Trusted network binding",
+            "severity": "critical",
+            "chip": "{} bound to {}".format(bound, entry.get("proxy_label")),
+            "metric": metric,
+            "summary": "Network fingerprint '{}' is bound to proxy config '{}' with action '{}' on '{}'.".format(
+                bound, entry.get("proxy_label"), entry.get("action"), entry.get("check_type")
+            ),
+            "meaning": (
+                "Local enforcement requires the network fingerprint to be defined but not attached to a proxy config. "
+                "Here it is attached, so whenever the fingerprint matches, the proxy config disconnects and the client "
+                "stops intercepting traffic. With no interception there is no flow to redirect to the enforcement point."
+            ),
+            "impact": (
+                "The proxy config was disconnected {} time(s) with reason InactiveTnd. While in that state the client "
+                "produced no redirect to a local enforcement point.".format(inactive)
+                if inactive
+                else "While the fingerprint matches, no traffic is intercepted, so local enforcement cannot run."
+            ),
+            "suggestions": [
+                "Remove the conditional action that references fingerprint '{}' from proxy config '{}' in Secure Access.".format(
+                    bound, entry.get("proxy_label")
+                ),
+                "Keep the fingerprint itself defined - it is what identifies a local user on the trusted network.",
+                "After the change, confirm the client pulls a new cached configuration and that the proxy config no longer reports InactiveTnd.",
+            ],
+            "groups": groups,
+            "bindings": binding.get("bindings") or [],
+        }
+
+    if fingerprints:
+        names = ", ".join(entry["label"] for entry in fingerprints)
+        return {
+            "label": "Trusted network binding",
+            "severity": "ok",
+            "chip": "{} not bound".format(names),
+            "metric": metric,
+            "summary": "Network fingerprint '{}' is defined and is not bound to any proxy config.".format(names),
+            "meaning": (
+                "This is the state local enforcement requires. The fingerprint identifies the trusted network without "
+                "pausing the proxy config, so traffic keeps being intercepted and can be redirected to the enforcement point."
+            ),
+            "impact": "Trusted-network detection is not blocking local enforcement in this bundle.",
+            "groups": groups,
+        }
+
+    return {
+        "label": "Trusted network binding",
+        "severity": "info",
+        "chip": "no fingerprint defined",
+        "metric": metric,
+        "summary": "No network fingerprint is defined in the cached configuration.",
+        "meaning": (
+            "Without a fingerprint the client cannot tell that it is on the trusted network, so a local user is not "
+            "identified as one. A remote user does not need the fingerprint - the redirect to the enforcement point still happens."
+        ),
+        "impact": "Local enforcement still works on the remote path; on-network users are not recognised as local.",
+        "groups": groups,
+    }
+
+
+def build_uztna_summary_payload(root_dir, flow_filter=""):
+    """Assessment cards and verdict for the Universal ZTNA view."""
+    runtime = analyze_uztna_runtime(root_dir)
+    if not runtime.get("available"):
+        return runtime
+
+    tnd_binding = analyze_uztna_tnd_binding(root_dir)
+    tnd_card = build_uztna_tnd_card(tnd_binding, runtime)
+
+    needle = str(flow_filter or "").strip().lower()
+    all_episodes = runtime["episodes"]
+    episodes = [e for e in all_episodes if episode_matches_uztna_filter(e, needle)]
+    filter_context = {
+        "term": str(flow_filter or "").strip(),
+        "matched": len(episodes),
+        "total": len(all_episodes),
+    }
+
+    if needle and not episodes:
+        return {
+            "available": True,
+            "episodes": [],
+            "filter": filter_context,
+            "verdict": {
+                "level": "unknown",
+                "summary": "No redirected flow matched '{}'. {} redirect episode(s) were found in this bundle.".format(
+                    filter_context["term"], len(all_episodes)
+                ),
+            },
+            "assessment": [],
+            "cloud_verifications": runtime.get("cloud_verifications", 0),
+            "cloud_servers": runtime.get("cloud_servers", []),
+        }
+    if not episodes:
+        if tnd_card and tnd_card["severity"] == "critical":
+            level = "problem"
+            summary = (
+                "No flow was redirected to a local enforcement point. " + tnd_card["summary"]
+                + " While that condition matches, the client stops intercepting traffic, so local enforcement cannot run."
+            )
+        else:
+            level = "unknown"
+            summary = "No Universal ZTNA redirect activity found. This bundle shows no flow steered to a local enforcement point."
+        return {
+            "available": True,
+            "episodes": [],
+            "episode_count": 0,
+            "abandoned_count": 0,
+            "enforcement_points": [],
+            "enforcement_modes": {},
+            "resources": [],
+            "filter": filter_context,
+            "verdict": {"level": level, "summary": summary},
+            "assessment": [tnd_card] if tnd_card else [],
+            "tnd_binding": tnd_binding,
+            "cloud_verifications": runtime.get("cloud_verifications", 0),
+            "cloud_servers": runtime.get("cloud_servers", []),
+        }
+
+    abandoned = [e for e in episodes if e.get("outcome") == "migration_abandoned"]
+    tls_failures = [e for e in episodes if e.get("tls_error")]
+    enforcement_points = sorted({e["redirect_to"] for e in episodes if e.get("redirect_to")})
+    enforcement_modes = {}
+    for episode in episodes:
+        mode = episode.get("enforcement") or "Unknown"
+        enforcement_modes[mode] = enforcement_modes.get(mode, 0) + 1
+    resources = {}
+    for episode in episodes:
+        key = episode.get("resource") or "unknown"
+        entry = resources.setdefault(key, {"label": key, "count": 0, "failed": 0, "match_rule": episode.get("match_rule")})
+        entry["count"] += 1
+        if episode.get("outcome") == "migration_abandoned":
+            entry["failed"] += 1
+
+    error_codes = {}
+    for episode in tls_failures:
+        error_codes[episode["tls_error"]] = error_codes.get(episode["tls_error"], 0) + 1
+
+    assessment = []
+    assessment.append({
+        "label": "Local enforcement redirects",
+        "severity": "critical" if abandoned else "ok",
+        "chip": "{} of {} failed".format(len(abandoned), len(episodes)) if abandoned else "{} succeeded".format(len(episodes)),
+        "metric": ", ".join(enforcement_points) or "no enforcement point recorded",
+        "summary": (
+            "Every flow steered to the local enforcement point was abandoned before the resource was reached."
+            if abandoned and len(abandoned) == len(episodes)
+            else "{} of {} redirect attempts were abandoned.".format(len(abandoned), len(episodes))
+            if abandoned
+            else "All redirect attempts completed the client-side stages."
+        ),
+        "meaning": (
+            "Secure Access authorised the access and told the client to use the on-premises firewall, "
+            "but the client could not establish the tunnel to it. Policy is not the problem - transport is."
+        ),
+        "impact": "The user cannot reach the private resource by this path, even though the access policy allowed it.",
+        "groups": [{"label": v["label"], "count": v["count"]} for v in sorted(resources.values(), key=lambda x: -x["count"])],
+        "group_kind": "resource",
+    })
+
+    if tnd_card:
+        assessment.append(tnd_card)
+
+    if tls_failures:
+        sample = tls_failures[0]
+        chain = sample.get("chain") or []
+        leaf = chain[0]["subject"] if chain else None
+        name_mismatch = any(code == "NAME_MISMATCH" for code in error_codes)
+        cn_matches_requested = bool(leaf and sample.get("tls_server") and leaf.endswith(sample["tls_server"]))
+        meaning = (
+            "The client rejected the enforcement point's certificate. The requested name and the certificate "
+            "subject shown in the log are the same, so a plain hostname typo is not the cause."
+            if name_mismatch and cn_matches_requested
+            else "The client rejected the enforcement point's certificate, so the mTLS tunnel was never established."
+        )
+        suggestions = [
+            "Compare the certificate presented by {} with the name the client requested.".format(", ".join(enforcement_points) or "the enforcement point"),
+        ]
+        if name_mismatch and cn_matches_requested:
+            suggestions.append(
+                "The agent log does not print Subject Alternative Names, so the SAN contents cannot be confirmed from this bundle. "
+                "Windows chain validation requires the requested name in the SAN and ignores CN alone - inspect the certificate directly to confirm."
+            )
+        suggestions.append("Confirm the issuing CA chain is trusted on the endpoint and that the certificate is issued for the proxy FQDN configured on the FTD.")
+
+        assessment.append({
+            "label": "Enforcement point certificate",
+            "severity": "critical",
+            "chip": ", ".join("{} x{}".format(code, count) for code, count in error_codes.items()),
+            "metric": "chain length {}".format(sample.get("chain_len") or "unknown"),
+            "summary": "TLS verification of the local enforcement point failed on every attempt.",
+            "meaning": meaning,
+            "impact": "Without a verified server certificate the client will not send the CONNECT or the access token, so no traffic reaches the resource.",
+            "suggestions": suggestions,
+            "chain": chain,
+            "groups": [{"label": code, "count": count} for code, count in error_codes.items()],
+        })
+
+    if runtime.get("cloud_verifications"):
+        assessment.append({
+            "label": "Cloud enforcement path",
+            "severity": "info",
+            "chip": "{} verifications".format(runtime["cloud_verifications"]),
+            "metric": ", ".join(runtime.get("cloud_servers") or []),
+            "summary": "The client also verified the Secure Access cloud proxy certificate, and no failure was recorded for it.",
+            "meaning": "The cloud path and the local path use different certificates. Only the local one is failing here.",
+            "impact": "Resources served by the cloud path are unaffected by this failure.",
+            "groups": [],
+        })
+
+    if abandoned:
+        level = "problem"
+        summary = "Universal ZTNA local enforcement is failing: {} of {} redirects to {} were abandoned at the TLS stage.".format(
+            len(abandoned), len(episodes), ", ".join(enforcement_points) or "the enforcement point"
+        )
+    else:
+        level = "healthy"
+        summary = "{} local enforcement redirects completed their client-side stages.".format(len(episodes))
+
+    return {
+        "available": True,
+        "episodes": episodes,
+        "episode_count": len(episodes),
+        "abandoned_count": len(abandoned),
+        "filter": filter_context,
+        "enforcement_points": enforcement_points,
+        "enforcement_modes": enforcement_modes,
+        "resources": sorted(resources.values(), key=lambda x: -x["count"]),
+        "assessment": assessment,
+        "verdict": {"level": level, "summary": summary},
+        "tnd_binding": tnd_binding,
+        "cloud_verifications": runtime.get("cloud_verifications", 0),
+        "cloud_servers": runtime.get("cloud_servers", []),
+    }
+
+
 def collect_configuration_sync_error_context(root_dir, max_matches=500):
     timestamp_pattern = re.compile(
         r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{4})?)"
@@ -6193,6 +6896,7 @@ def analyze():
     client_timezone_offset_minutes = request.form.get('client_timezone_offset_minutes', '').strip()
     cached_config_search_term = request.form.get('cached_config_search_term', '').strip()
     duo_posture_filter = request.form.get('duo_posture_filter', '').strip()
+    uztna_filter = request.form.get('uztna_filter', '').strip()
     allowed_spa_checks = [
         'Check Inclusions or Exclusions',
         'Check SIA Flow',
@@ -6356,8 +7060,39 @@ def analyze():
             event_viewer_summary_payload = None
             tnd_summary_payload = None
             user_pause_summary_payload = None
+            uztna_summary_payload = None
 
             org_id_results = extract_org_ids_from_enrollments(temp_dir)
+            if selected_module == 'UZTNA':
+                uztna_summary_payload = build_uztna_summary_payload(temp_dir, uztna_filter)
+                mock_report += "\n[Universal ZTNA]\n"
+                if uztna_filter:
+                    mock_report += "  - Flow filter: '{}'\n".format(uztna_filter)
+                if not uztna_summary_payload.get("available"):
+                    mock_report += "  - {}\n".format(uztna_summary_payload.get("reason", "No Zero Trust Access data in this bundle."))
+                elif not uztna_summary_payload.get("episodes"):
+                    if uztna_filter:
+                        mock_report += "  - No redirected flow matched this filter.\n"
+                    else:
+                        mock_report += "  - No local-enforcement redirect activity found in this bundle.\n"
+                        mock_report += "  - Universal ZTNA steers a flow to a local enforcement point (FTD); no such redirect was logged.\n"
+                else:
+                    verdict = uztna_summary_payload.get("verdict", {})
+                    mock_report += "  - {}\n".format(verdict.get("summary", ""))
+                    mock_report += "  - Redirect episodes: {} ({} abandoned)\n".format(
+                        uztna_summary_payload.get("episode_count", 0),
+                        uztna_summary_payload.get("abandoned_count", 0),
+                    )
+                    if uztna_summary_payload.get("enforcement_points"):
+                        mock_report += "  - Local enforcement point(s): {}\n".format(
+                            ", ".join(uztna_summary_payload["enforcement_points"])
+                        )
+                    for resource in uztna_summary_payload.get("resources", []):
+                        mock_report += "      * {} - {} attempt(s), {} abandoned\n".format(
+                            resource["label"], resource["count"], resource["failed"]
+                        )
+                    mock_report += "  - Firewall-side enforcement (SNI check, token validation, Snort) is not visible in a DART bundle.\n"
+
             if selected_module == 'ZTA' and not cached_config_search_only_output and not concise_zta_check_output:
                 if org_id_results["org_ids"]:
                     mock_report += "\n[ZTA Enrollment]\n"
@@ -8782,6 +9517,9 @@ def analyze():
                 and user_pause_summary_payload
             ):
                 response_data["user_pause_summary"] = user_pause_summary_payload
+
+            if selected_module == 'UZTNA' and uztna_summary_payload:
+                response_data["uztna_summary"] = uztna_summary_payload
 
             if selected_module == 'Duo Desktop' and duo_posture_flow_summary_payload:
                 response_data["duo_posture_flow_summary"] = duo_posture_flow_summary_payload

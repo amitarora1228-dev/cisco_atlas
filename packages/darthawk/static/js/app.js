@@ -1570,6 +1570,19 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             return { icon: '\u2139\uFE0F', text: label };
         }
 
+        let lastZtaPreviewSignals = null;
+
+        // The upload preview is ZTA-shaped, so it is only shown for modules it describes.
+        function syncZtaSummaryForModule() {
+            const selected = document.querySelector('input[name="module"]:checked');
+            const isUztna = selected && selected.value === 'UZTNA';
+            if (isUztna || !lastZtaPreviewSignals || !lastZtaPreviewSignals.available) {
+                resetZtaSummary();
+                return;
+            }
+            renderZtaSummary(lastZtaPreviewSignals);
+        }
+
         function resetZtaSummary() {
             if (ztaSummaryHeadline) {
                 ztaSummaryHeadline.textContent = '';
@@ -3757,6 +3770,440 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         }
 
 
+        const uztnaSummaryWrap = document.getElementById('uztnaSummaryWrap');
+        const uztnaOptions = document.getElementById('uztnaOptions');
+        const uztnaFlowFilterInput = document.getElementById('uztnaFlowFilterInput');
+        const uztnaSummarySub = document.getElementById('uztnaSummarySub');
+        const uztnaSummaryHeadline = document.getElementById('uztnaSummaryHeadline');
+        const uztnaSummaryVerdict = document.getElementById('uztnaSummaryVerdict');
+        const uztnaSummaryCards = document.getElementById('uztnaSummaryCards');
+        const uztnaSummaryLadders = document.getElementById('uztnaSummaryLadders');
+
+        const UZTNA_STAGE_GLYPH = { ok: '✓', fail: '✕', blocked: '⊘', unknown: '?' };
+
+        function uztnaAppendTextWithLinks(parent, text) {
+            const pattern = /(https?:\/\/[^\s)]+)/g;
+            let last = 0;
+            String(text || '').replace(pattern, function (url, _m, offset) {
+                if (offset > last) { parent.appendChild(document.createTextNode(text.slice(last, offset))); }
+                const a = document.createElement('a');
+                a.href = url; a.textContent = url; a.target = '_blank'; a.rel = 'noopener';
+                a.className = 'dh-suggest-link';
+                parent.appendChild(a);
+                last = offset + url.length;
+                return url;
+            });
+            if (last < String(text || '').length) { parent.appendChild(document.createTextNode(text.slice(last))); }
+        }
+
+        function resetUztnaSummary() {
+            [uztnaSummarySub, uztnaSummaryHeadline, uztnaSummaryVerdict, uztnaSummaryCards, uztnaSummaryLadders]
+                .forEach(function (node) { if (node) { node.innerHTML = ''; } });
+            if (uztnaSummaryWrap) {
+                uztnaSummaryWrap.classList.add('hidden');
+            }
+        }
+
+        // Flows that fail the same way at the same stage tell one story, so they are
+        // grouped by outcome signature rather than listed one row per flow.
+        // Mirrors the standalone analyzer's behaviour: selecting a step in the SVG
+        // highlights the log line that produced it.
+        function attachUztnaSequenceInteraction(seqEl, model, container) {
+            const events = model.events || [];
+            const log = model.logLines || [];
+            if (!log.length) { return; }
+
+            const detail = document.createElement('div');
+            detail.className = 'dh-seq-detail';
+            detail.textContent = 'Click any step above to highlight the log line that produced it.';
+            container.appendChild(detail);
+
+            const box = document.createElement('div');
+            box.className = 'dh-seq-log';
+            log.forEach(function (line, i) {
+                const ln = document.createElement('div');
+                ln.className = 'ln';
+                ln.dataset.i = String(i);
+                ln.textContent = line;
+                box.appendChild(ln);
+            });
+            container.appendChild(box);
+
+            const lineEls = box.querySelectorAll('.ln');
+            const rows = seqEl.querySelectorAll('.fa-row');
+            rows.forEach(function (row) {
+                row.addEventListener('click', function () {
+                    const idx = parseInt(row.getAttribute('data-idx'), 10);
+                    const ev = events[idx];
+                    if (!ev) { return; }
+                    rows.forEach(function (r) { r.classList.remove('sel'); });
+                    row.classList.add('sel');
+                    lineEls.forEach(function (l) { l.classList.remove('hl', 'hlerr'); });
+                    detail.innerHTML = '<span class="dl"></span><span class="ts"></span>';
+                    detail.querySelector('.dl').textContent = ev.label;
+                    detail.querySelector('.ts').textContent = ev.timestamp ? '  ' + ev.timestamp : '';
+                    const li = typeof ev.logIndex === 'number' ? ev.logIndex : -1;
+                    if (li >= 0 && lineEls[li]) {
+                        lineEls[li].classList.add(ev.error ? 'hlerr' : 'hl');
+                        box.scrollTop = lineEls[li].offsetTop - box.clientHeight / 2 + lineEls[li].clientHeight / 2;
+                    }
+                });
+            });
+        }
+
+        function buildUztnaStripLegend() {
+            const legend = document.createElement('div');
+            legend.className = 'dh-legend';
+            [
+                ['ok', '\u2713', 'Stage completed'],
+                ['fail', '\u2715', 'Stage failed \u2014 the flow stopped here'],
+                ['blocked', '\u2298', 'Never ran \u2014 blocked by the failure above'],
+                ['unknown', '?', 'Not recorded in the log'],
+            ].forEach(function (item) {
+                const row = document.createElement('span');
+                row.className = 'dh-legend-item';
+                const dot = document.createElement('span');
+                dot.className = 'dh-strip-dot is-' + item[0];
+                dot.textContent = item[1];
+                row.appendChild(dot);
+                const txt = document.createElement('span');
+                txt.textContent = item[2];
+                row.appendChild(txt);
+                legend.appendChild(row);
+            });
+            return legend;
+        }
+
+        function buildUztnaSequenceLegend(model) {
+            const legend = document.createElement('div');
+            legend.className = 'dh-legend dh-legend-seq';
+            const client = model.clientLabel || 'Client';
+            const peer = model.proxyLabel || 'Peer';
+            [
+                ['o', '\u2192', client + ' \u2192 ' + peer + ' (request / setup)'],
+                ['i', '\u2190', peer + ' \u2192 ' + client + ' (response / connected)'],
+                ['s', '\u21ba', 'Client-side processing \u2014 nothing left the endpoint'],
+                ['e', '\u26a0', 'Error / failure'],
+            ].forEach(function (item) {
+                const row = document.createElement('span');
+                row.className = 'dh-legend-item';
+                const glyph = document.createElement('span');
+                glyph.className = 'dh-legend-glyph is-' + item[0];
+                glyph.textContent = item[1];
+                row.appendChild(glyph);
+                const txt = document.createElement('span');
+                txt.textContent = item[2];
+                row.appendChild(txt);
+                legend.appendChild(row);
+            });
+            return legend;
+        }
+
+        function groupUztnaEpisodes(episodes) {
+            const groups = [];
+            const byKey = {};
+            episodes.forEach(function (ep) {
+                const statuses = (ep.ladder || []).map(function (s) { return s.status; }).join('');
+                const key = (ep.resource || '?') + '|' + statuses + '|' + (ep.tls_error || '');
+                if (!byKey[key]) {
+                    byKey[key] = {
+                        key: key,
+                        resource: ep.resource || 'unknown',
+                        ladder: ep.ladder || [],
+                        tlsError: ep.tls_error || '',
+                        failedStage: (ep.ladder || []).find(function (s) { return s.status === 'fail'; }),
+                        episodes: [],
+                    };
+                    groups.push(byKey[key]);
+                }
+                byKey[key].episodes.push(ep);
+            });
+            groups.sort(function (a, b) { return b.episodes.length - a.episodes.length; });
+            return groups;
+        }
+
+        function buildUztnaStageStrip(ladder) {
+            const strip = document.createElement('span');
+            strip.className = 'dh-strip';
+            (ladder || []).forEach(function (stage, i) {
+                if (i) {
+                    const link = document.createElement('span');
+                    link.className = 'dh-strip-link';
+                    strip.appendChild(link);
+                }
+                const dot = document.createElement('span');
+                dot.className = 'dh-strip-dot is-' + stage.status;
+                dot.title = stage.name + ' — ' + stage.detail;
+                dot.textContent = UZTNA_STAGE_GLYPH[stage.status] || '?';
+                strip.appendChild(dot);
+            });
+            return strip;
+        }
+
+        function buildUztnaGroup(group, index) {
+            const wrap = document.createElement('details');
+            wrap.className = 'dh-grp';
+            if (index === 0) { wrap.open = true; }
+
+            const failed = !!group.failedStage;
+            const n = group.episodes.length;
+            const head = document.createElement('summary');
+            head.className = 'dh-grp-head';
+
+            const dot = document.createElement('span');
+            dot.className = 'dh-ladder-dot ' + (failed ? 'is-fail' : 'is-ok');
+            head.appendChild(dot);
+
+            const title = document.createElement('span');
+            title.className = 'dh-grp-title';
+            title.textContent = group.resource;
+            head.appendChild(title);
+
+            head.appendChild(buildUztnaStageStrip(group.ladder));
+
+            const verdict = document.createElement('span');
+            verdict.className = 'dh-grp-verdict' + (failed ? ' is-fail' : '');
+            verdict.textContent = failed
+                ? n + (n === 1 ? ' flow' : ' flows') + ' stopped at ' + group.failedStage.name
+                    + (group.tlsError ? ' (' + group.tlsError + ')' : '')
+                : n + (n === 1 ? ' flow' : ' flows') + ' completed the client-side stages';
+            head.appendChild(verdict);
+            wrap.appendChild(head);
+
+            const body = document.createElement('div');
+            body.className = 'dh-grp-body';
+
+            const stagesCap = document.createElement('div');
+            stagesCap.className = 'dh-grp-caption';
+            stagesCap.textContent = 'Stage summary';
+            body.appendChild(stagesCap);
+
+            const rungs = document.createElement('div');
+            rungs.className = 'dh-ladder-rungs';
+            (group.ladder || []).forEach(function (stage) {
+                const row = document.createElement('div');
+                row.className = 'dh-rung is-' + stage.status;
+                row.innerHTML = '<span class="dh-rung-mark">' + (UZTNA_STAGE_GLYPH[stage.status] || '?') + '</span>'
+                    + '<span class="dh-rung-name">' + stage.name + '</span>'
+                    + '<span class="dh-rung-actor">' + (stage.actor || '') + '</span>'
+                    + '<span class="dh-rung-detail">' + stage.detail + '</span>';
+                rungs.appendChild(row);
+            });
+            body.appendChild(rungs);
+
+            const utils = window.DarthawkFlowUtils;
+            const rep = group.episodes[0];
+            const model = utils && typeof utils.buildUztnaFlowModel === 'function' && (rep.lines || []).length
+                ? utils.buildUztnaFlowModel(rep)
+                : null;
+
+            if (model && model.events && model.events.length) {
+                const cap = document.createElement('div');
+                cap.className = 'dh-grp-caption';
+                cap.textContent = n === 1
+                    ? 'Sequence for srcPort ' + (rep.src_port || '?')
+                    : 'Sequence for srcPort ' + (rep.src_port || '?') + ' — representative of all ' + n + ' flows below';
+                body.appendChild(cap);
+                // The sequence view carries its own dark palette, so it needs a dark
+                // surface to stay legible under either theme.
+                const seq = document.createElement('div');
+                seq.className = 'dh-seq';
+                seq.innerHTML = renderFlowSequenceSvg(model);
+                body.appendChild(seq);
+                body.appendChild(buildUztnaSequenceLegend(model));
+                attachUztnaSequenceInteraction(seq, model, body);
+            }
+
+            const portsLabel = document.createElement('div');
+            portsLabel.className = 'dh-grp-caption';
+            portsLabel.textContent = 'Affected flows (' + n + ') — open one for its own sequence and log drill-down';
+            body.appendChild(portsLabel);
+
+            const ports = document.createElement('div');
+            ports.className = 'dh-ports';
+            group.episodes.slice(0, 60).forEach(function (ep) {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'dh-port-chip';
+                chip.innerHTML = '<span class="dh-port-num">' + (ep.src_port || '?') + '</span>'
+                    + '<span class="dh-port-meta">' + (ep.process || '') + ' · '
+                    + (ep.start ? ep.start.slice(11, 19) : '') + '</span>';
+                chip.addEventListener('click', function () {
+                    const m = utils && utils.buildUztnaFlowModel ? utils.buildUztnaFlowModel(ep) : null;
+                    if (m) {
+                        openFlowVisualTab(m, 'Visual Flow Analyzer · Universal ZTNA · '
+                            + (ep.resource || 'flow') + ' · srcPort ' + (ep.src_port || '?'));
+                    }
+                });
+                ports.appendChild(chip);
+            });
+            body.appendChild(ports);
+            if (n > 60) {
+                const more = document.createElement('p');
+                more.className = 'dh-ladder-note';
+                more.textContent = 'Showing the first 60 of ' + n + ' flows in this group.';
+                body.appendChild(more);
+            }
+
+            wrap.appendChild(body);
+            return wrap;
+        }
+
+        function buildUztnaLadder(episode, index) {
+            const wrap = document.createElement('details');
+            wrap.className = 'dh-ladder';
+            if (index === 0) { wrap.open = true; }
+
+            const summary = document.createElement('summary');
+            summary.className = 'dh-ladder-summary';
+            const failed = (episode.ladder || []).some(function (s) { return s.status === 'fail'; });
+            summary.innerHTML = '<span class="dh-ladder-dot ' + (failed ? 'is-fail' : 'is-ok') + '"></span>'
+                + '<span class="dh-ladder-title">' + (episode.resource || 'unknown resource') + '</span>'
+                + '<span class="dh-ladder-meta">srcPort ' + (episode.src_port || '?')
+                + (episode.process ? ' · ' + episode.process : '')
+                + (episode.start ? ' · ' + episode.start.slice(11, 19) : '') + '</span>';
+            wrap.appendChild(summary);
+
+            const rungs = document.createElement('div');
+            rungs.className = 'dh-ladder-rungs';
+            (episode.ladder || []).forEach(function (stage) {
+                const row = document.createElement('div');
+                row.className = 'dh-rung is-' + stage.status;
+                row.innerHTML = '<span class="dh-rung-mark">' + (UZTNA_STAGE_GLYPH[stage.status] || '?') + '</span>'
+                    + '<span class="dh-rung-name">' + stage.name + '</span>'
+                    + '<span class="dh-rung-actor">' + (stage.actor || '') + '</span>'
+                    + '<span class="dh-rung-detail">' + stage.detail + '</span>';
+                rungs.appendChild(row);
+            });
+
+            wrap.appendChild(rungs);
+            return wrap;
+        }
+
+        function renderUztnaSummary(summary) {
+            resetUztnaSummary();
+            if (!summary || !uztnaSummaryWrap || !summary.available) {
+                if (summary && uztnaSummaryWrap && summary.reason) {
+                    uztnaSummaryVerdict.innerHTML = '<div class="dh-snap-verdict"><div class="dh-snap-verdict-summary">'
+                        + summary.reason + '</div></div>';
+                    uztnaSummaryWrap.classList.remove('hidden');
+                }
+                return;
+            }
+
+            const verdict = summary.verdict || {};
+            uztnaSummaryVerdict.innerHTML = '<div class="dh-snap-verdict is-' + (verdict.level || 'unknown') + '">'
+                + '<div class="dh-snap-verdict-title">' + (verdict.level === 'problem' ? '✕ Local enforcement failing'
+                    : verdict.level === 'healthy' ? '✓ Local enforcement healthy' : 'ℹ No Universal ZTNA activity') + '</div>'
+                + '<div class="dh-snap-verdict-summary">' + (verdict.summary || '') + '</div></div>';
+
+            if (summary.enforcement_points && summary.enforcement_points.length) {
+                uztnaSummarySub.textContent = 'Local enforcement point: ' + summary.enforcement_points.join(', ');
+            }
+            const flt = summary.filter;
+            if (flt && flt.term) {
+                const note = document.createElement('div');
+                note.className = 'dh-chip is-info';
+                note.textContent = 'Filtered by “' + flt.term + '” — ' + flt.matched + ' of ' + flt.total + ' redirected flows';
+                uztnaSummaryVerdict.appendChild(note);
+            }
+            if (summary.episode_count) {
+                uztnaSummaryHeadline.textContent = summary.abandoned_count
+                    ? summary.abandoned_count + ' of ' + summary.episode_count + ' redirects abandoned'
+                    : summary.episode_count + ' redirects';
+            }
+
+            (summary.assessment || []).forEach(function (card) {
+                const box = document.createElement('div');
+                box.className = 'dh-issue sev-' + (card.severity === 'critical' ? 'critical'
+                    : card.severity === 'warning' ? 'warning' : 'info');
+                let html = '<div class="dh-issue-head"><span class="dh-issue-title">' + card.label + '</span>'
+                    + '<span class="dh-issue-badge">' + (card.chip || '') + '</span></div>'
+                    + '<div class="dh-issue-summary">' + (card.summary || '') + '</div>';
+                if (card.meaning) {
+                    html += '<div class="dh-issue-block"><div class="dh-issue-block-label">What it means</div>'
+                        + '<div class="dh-issue-block-body">' + card.meaning + '</div></div>';
+                }
+                if (card.impact) {
+                    html += '<div class="dh-issue-block"><div class="dh-issue-block-label">Impact</div>'
+                        + '<div class="dh-issue-block-body">' + card.impact + '</div></div>';
+                }
+                if (card.metric) {
+                    html += '<div class="dh-issue-metric">' + card.metric + '</div>';
+                }
+                box.innerHTML = html;
+
+                if (card.groups && card.groups.length && card.group_kind !== 'resource') {
+                    const evidence = document.createElement('div');
+                    evidence.className = 'dh-issue-block';
+                    evidence.innerHTML = '<div class="dh-issue-block-label">What the logs show</div>';
+                    const list = document.createElement('div');
+                    list.className = 'dh-evlist';
+                    card.groups.forEach(function (group) {
+                        const row = document.createElement('div');
+                        row.className = 'dh-evrow';
+                        row.innerHTML = '<span class="dh-evrow-text">' + group.label + '</span>'
+                            + '<span class="dh-evrow-count">' + group.count + '×</span>';
+                        list.appendChild(row);
+                    });
+                    evidence.appendChild(list);
+                    box.appendChild(evidence);
+                }
+
+                if (card.chain && card.chain.length) {
+                    const chain = document.createElement('div');
+                    chain.className = 'dh-certchain';
+                    chain.innerHTML = '<div class="dh-issue-block-label">Certificate chain presented</div>';
+                    card.chain.forEach(function (link, i) {
+                        const row = document.createElement('div');
+                        row.className = 'dh-certlink';
+                        row.innerHTML = '<span class="dh-certlink-idx">' + (i === 0 ? 'leaf' : i) + '</span>'
+                            + '<code>' + link.subject + '</code>'
+                            + '<span class="dh-certlink-by">issued by</span><code>' + link.issuer + '</code>';
+                        chain.appendChild(row);
+                    });
+                    box.appendChild(chain);
+                }
+
+                if (card.suggestions && card.suggestions.length) {
+                    const sugg = document.createElement('div');
+                    sugg.className = 'dh-suggest';
+                    sugg.innerHTML = '<div class="dh-suggest-label">Suggested next steps</div>';
+                    const list = document.createElement('ul');
+                    card.suggestions.forEach(function (item) {
+                        const li = document.createElement('li');
+                        uztnaAppendTextWithLinks(li, item);
+                        list.appendChild(li);
+                    });
+                    sugg.appendChild(list);
+                    box.appendChild(sugg);
+                }
+                uztnaSummaryCards.appendChild(box);
+            });
+
+            const episodes = summary.episodes || [];
+            if (episodes.length) {
+                const groups = groupUztnaEpisodes(episodes);
+                const head = document.createElement('div');
+                head.className = 'dh-snap-section';
+                head.textContent = 'Connection ladder — ' + episodes.length + ' redirect'
+                    + (episodes.length === 1 ? '' : 's') + ' in ' + groups.length
+                    + ' outcome' + (groups.length === 1 ? '' : 's');
+                uztnaSummaryLadders.appendChild(head);
+                const note = document.createElement('p');
+                note.className = 'dh-ladder-note';
+                note.textContent = 'Flows that fail the same way at the same stage are grouped together. '
+                    + 'Firewall-side enforcement is not visible in a DART bundle.';
+                uztnaSummaryLadders.appendChild(note);
+                uztnaSummaryLadders.appendChild(buildUztnaStripLegend());
+                groups.forEach(function (group, i) {
+                    uztnaSummaryLadders.appendChild(buildUztnaGroup(group, i));
+                });
+            }
+
+            uztnaSummaryWrap.classList.remove('hidden');
+        }
+
         function resetUserPauseSummary() {
             if (userPauseOverallStatus) {
                 userPauseOverallStatus.innerHTML = '';
@@ -5804,10 +6251,11 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 }
 
                 if (data.zta_preview_signals && data.zta_preview_signals.available) {
-                    renderZtaSummary(data.zta_preview_signals);
+                    lastZtaPreviewSignals = data.zta_preview_signals;
                 } else {
-                    resetZtaSummary();
+                    lastZtaPreviewSignals = null;
                 }
+                syncZtaSummaryForModule();
 
                 if (data.bundle_session_id) {
                     showAgentChatOnlyPane();
@@ -6001,6 +6449,10 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         function toggleZtaOptions() {
             const selected = document.querySelector('input[name="module"]:checked');
             updateModuleButtonsVisibility(selected ? selected.id : '');
+            syncZtaSummaryForModule();
+            if (uztnaOptions) {
+                uztnaOptions.classList.toggle('hidden', !(selected && selected.value === 'UZTNA'));
+            }
             const isZta = selected && selected.value === 'ZTA';
             const isDuo = selected && selected.value === 'Duo Desktop';
             ztaOptions.classList.toggle('hidden', !isZta);
@@ -6704,6 +7156,9 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             formData.append('module', moduleInput.value);
             formData.append('enable_ai_insight', enableAiInsight && enableAiInsight.checked ? '1' : '0');
             appendClientTimezoneOffset(formData);
+            if (moduleInput.value === 'UZTNA' && uztnaFlowFilterInput) {
+                formData.append('uztna_filter', uztnaFlowFilterInput.value.trim());
+            }
             if (moduleInput.value === 'ZTA') {
                 if (normalizedZtaModeValue) {
                     formData.append('zta_access_mode', normalizedZtaModeValue);
@@ -7132,6 +7587,13 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         setResultOutputPanelVisibility(false);
                     } else {
                         resetUserPauseSummary();
+                    }
+
+                    if (moduleInput.value === 'UZTNA' && data.uztna_summary) {
+                        renderUztnaSummary(data.uztna_summary);
+                        setResultOutputPanelVisibility(false);
+                    } else {
+                        resetUztnaSummary();
                     }
 
                     if (moduleInput.value === 'Duo Desktop' && data.duo_posture_flow_summary) {

@@ -230,7 +230,9 @@ confident join built on nothing, so none was. Needs one real sample of each.
 | Tailwind loads from a CDN | Console warns it is not for production | Small |
 | Three fonts load from Google | STATE.md limitation 5 | Small |
 | `_regress_baseline.json` is stale | STATE.md limitation 7 | Small |
-| VPN, Umbrella, UZTNA, EDLP modules unimplemented | Rail entries exist; no analysis behind them | Large |
+| VPN, Umbrella, EDLP modules unimplemented | Rail entries exist; no analysis behind them | Large |
+| UZTNA covers only the local-enforcement redirect | Implemented and verified against `DARTBundle_1222_1600` (113 episodes, 110 failing at TLS) and against a working/non-working pair from one tenant. Enforcement mode is now derived from the migrated protocol-stack headend, and the trusted-network fingerprint binding is read from the cached config to explain a bundle with no redirects at all. Not covered: a bundle where redirects *succeed* (none available, so the healthy path is unexercised) and UDP resources. Firewall-side enforcement is permanently out of reach from a bundle | Medium |
+| ~~UZTNA module unimplemented, and blocked on evidence~~ **Superseded** | Rail entry exists; the route now returns an honest "no UZTNA check was run" placeholder instead of a bare payload line. No UZTNA bundle exists in `DARTLogs/` (all 8 are ZTA SPA/SIA), so detection cannot be written without guessing at an unseen log format - and a parser that never matches renders as "healthy". Understood to reuse the Zero Trust Access module rather than emit its own artefacts, which would make this a policy/enrollment-mode view over ZTA data rather than a new parser tree; unconfirmed against a bundle | Blocked: needs a UZTNA bundle |
 | A HAR remains in git history at `6bd709c` | Removed in `df16b9e`, blob still reachable; needs a force push, not done unilaterally | Decision needed |
 
 ---

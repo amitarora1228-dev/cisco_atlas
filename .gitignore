@@ -21,6 +21,8 @@ __pycache__/
 *.pcapng
 DARTLogs/
 Logs/
+# Working folder for UZTNA evidence - holds extracted DART bundles.
+uZTNA-Component/
 docs/deck-img/
 # Built from docs/deck-img, so it embeds the same customer screenshots.
 ATLAS-Overview.pptx

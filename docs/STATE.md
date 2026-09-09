@@ -387,10 +387,39 @@ Ordered by how likely they are to bite.
    extraction from analysis inside the engine.
 6. **`/atlas/api/bundle/analyze-all` has no test.** Verified by hand against a
    real bundle only.
-7. **VPN, Umbrella, UZTNA and EDLP are not implemented** in the bundle engine.
-   They are accepted and return only a payload-received line; the route still
-   carries a placeholder where the parsing would go. Only **ZTA** and **Duo
-   Desktop** do real work. They are excluded from run-everything for that reason.
+7. **VPN, Umbrella and EDLP are not implemented** in the bundle engine. They are
+   accepted and return only a payload-received line; the route still carries a
+   placeholder where the parsing would go. They are excluded from
+   run-everything for that reason.
+7a. **UZTNA is implemented for one thing only: the local-enforcement redirect.**
+   Universal ZTNA keeps policy evaluation in Secure Access and varies only the
+   data plane, so the client-visible marker is a flow redirected onto a local
+   enforcement point (FTD) instead of the cloud proxy.
+   `analyze_uztna_runtime()` parses each redirect as one migration episode
+   (intercept, redirect, DNS, TCP, TLS/mTLS, CONNECT+token, resource access) and
+   `build_uztna_summary_payload()` turns those into cards and a verdict; the UI
+   renders one ladder per episode. **Everything the firewall does is invisible
+   here** - SNI check, token validation, ZeroMQ metadata lookup and the Snort
+   Zero Trust plugin all live on the FTD, so a UZTNA failure can be client-clean
+   and still broken. The last two ladder rungs say so rather than reporting
+   success. Verified against `DARTBundle_1222_1600`: 113 episodes, 110 abandoned
+   at TLS with `NAME_MISMATCH`, one enforcement point, two resources.
+
+   Local vs cloud is **derived, not assumed**: the agent logs the protocol stack
+   on both sides of a migration, so `_uztna_classify_enforcement()` reads the
+   headend of the `new protocol stack:` `layer:` lines and reports Cloud when it
+   is `*.zpc.sse.cisco.com`, Local otherwise, `Unknown` when neither a headend
+   nor a redirect target was recorded.
+
+   `analyze_uztna_tnd_binding()` additionally reads
+   `enrollments/cached_configs/*.json`. Local enforcement requires the network
+   fingerprint to be defined but **not** referenced by any
+   `proxy_configs[].conditional_actions[].match_network_fingerprints`; a
+   `disconnect` binding pauses the proxy config on the trusted network, so no
+   traffic is intercepted and no redirect can occur. That card is emitted in the
+   no-episode branch too, since the binding is the reason there are no episodes.
+   A remote user does not need a fingerprint at all - the redirect still
+   happens - so an absent fingerprint is reported as info, not as a fault.
 8. **Nothing inside a CONNECT tunnel can be read without a key log.** The status
    code, the error and the payload are encrypted, so rejection by the
    destination, throttling by the intermediary and the client giving up are

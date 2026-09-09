@@ -131,6 +131,55 @@ body.dh-app {
         }
         .dh-issue-block-body { margin-top: 0.15rem; font-size: 0.88rem; color: var(--text-main); line-height: 1.5; }
 
+        /* Universal ZTNA connection ladder */
+        .dh-ladder {
+            margin-top: 0.5rem; border: 1px solid var(--border-main); border-radius: 0.5rem;
+            background: var(--surface-card); overflow: hidden;
+        }
+        .dh-ladder-summary {
+            display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.75rem;
+            cursor: pointer; list-style: none; font-size: 0.86rem; color: var(--text-main);
+        }
+        .dh-ladder-summary::-webkit-details-marker { display: none; }
+        .dh-ladder-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .dh-ladder-dot.is-ok { background: #10b981; }
+        .dh-ladder-dot.is-fail { background: #ef4444; }
+        .dh-ladder-title { font-weight: 700; }
+        .dh-ladder-meta { margin-left: auto; font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; color: var(--text-muted); }
+        .dh-ladder-note { margin-top: 0.25rem; font-size: 0.78rem; color: var(--text-muted); }
+        .dh-ladder-rungs { padding: 0.25rem 0.75rem 0.7rem; }
+        .dh-rung {
+            display: grid; grid-template-columns: 1.2rem 8.5rem 9rem 1fr; align-items: baseline;
+            gap: 0.5rem; padding: 0.3rem 0; position: relative; font-size: 0.82rem;
+            border-left: 2px solid var(--border-main); margin-left: 0.35rem; padding-left: 0.75rem;
+        }
+        .dh-rung-mark { font-weight: 700; }
+        .dh-rung.is-ok .dh-rung-mark { color: #10b981; }
+        .dh-rung.is-fail .dh-rung-mark { color: #ef4444; }
+        .dh-rung.is-blocked .dh-rung-mark { color: var(--text-muted); }
+        .dh-rung.is-unknown .dh-rung-mark { color: var(--text-muted); }
+        .dh-rung.is-fail { border-left-color: #ef4444; }
+        .dh-rung.is-ok { border-left-color: #10b981; }
+        .dh-rung-name { font-weight: 700; color: var(--text-main); }
+        .dh-rung-actor { font-size: 0.74rem; color: var(--text-muted); }
+        .dh-rung-detail { font-family: ui-monospace, Consolas, monospace; font-size: 0.76rem; color: var(--text-main); word-break: break-word; }
+        .dh-rung.is-blocked .dh-rung-detail, .dh-rung.is-unknown .dh-rung-detail { color: var(--text-muted); }
+        @media (max-width: 720px) {
+            .dh-rung { grid-template-columns: 1.2rem 1fr; }
+            .dh-rung-actor { display: none; }
+        }
+        .dh-certchain { margin-top: 0.6rem; }
+        .dh-certlink {
+            display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem;
+            padding: 0.25rem 0; font-size: 0.78rem; color: var(--text-main);
+        }
+        .dh-certlink code { font-family: ui-monospace, Consolas, monospace; background: var(--surface-soft); padding: 0.05rem 0.3rem; border-radius: 0.25rem; }
+        .dh-certlink-idx {
+            font-size: 0.68rem; text-transform: uppercase; letter-spacing: .04em;
+            color: var(--text-muted); min-width: 2.2rem;
+        }
+        .dh-certlink-by { font-size: 0.72rem; color: var(--text-muted); }
+
         .dh-diagram {
             margin-top: 0.35rem; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
         }
@@ -868,3 +917,107 @@ body.dh-app {
         .theme-darker .top-toolbar-btn:hover {
             background: rgba(30, 41, 59, 0.95);
         }
+
+        .dh-ladder-actions { margin-top: 0.55rem; padding-left: 0.75rem; }
+        .dh-seq {
+            background: #020617; border: 1px solid rgba(56,189,248,.25); border-radius: 10px;
+            padding: 10px; overflow-x: auto; margin-top: 0.25rem;
+        }
+        .dh-seq svg { display: block; }
+
+        /* Universal ZTNA: outcome groups with an inline stage strip */
+        .dh-grp {
+            margin-top: 0.5rem; border: 1px solid var(--border-main); border-radius: 0.5rem;
+            background: var(--surface-card); overflow: hidden;
+        }
+        .dh-grp-head {
+            display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.75rem;
+            cursor: pointer; list-style: none; flex-wrap: wrap;
+        }
+        .dh-grp-head::-webkit-details-marker { display: none; }
+        .dh-grp-title { font-weight: 700; font-size: 0.88rem; color: var(--text-main); }
+        .dh-grp-verdict { margin-left: auto; font-size: 0.78rem; color: var(--text-muted); }
+        .dh-grp-verdict.is-fail { color: #ef4444; font-weight: 600; }
+        .dh-grp-body { padding: 0 0.75rem 0.75rem; }
+        .dh-grp-caption {
+            font-size: 0.72rem; letter-spacing: .06em; text-transform: uppercase;
+            color: var(--text-muted); margin: 0.6rem 0 0.3rem;
+        }
+        .dh-strip { display: inline-flex; align-items: center; }
+        .dh-strip-dot {
+            width: 16px; height: 16px; border-radius: 50%; display: inline-flex;
+            align-items: center; justify-content: center; font-size: 9px; font-weight: 700;
+            color: #fff; cursor: default;
+        }
+        .dh-strip-dot.is-ok { background: #10b981; }
+        .dh-strip-dot.is-fail { background: #ef4444; }
+        .dh-strip-dot.is-blocked { background: #cbd5e1; color: #64748b; }
+        .dh-strip-dot.is-unknown { background: #e2e8f0; color: #94a3b8; }
+        .dh-strip-link { width: 10px; height: 2px; background: var(--border-main); }
+        .dh-ports { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .dh-port-chip {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+            border: 1px solid var(--border-main); border-radius: 0.4rem;
+            background: var(--surface-soft); padding: 0.25rem 0.5rem; cursor: pointer;
+            font-family: inherit; text-align: left;
+        }
+        .dh-port-chip:hover { border-color: var(--accent); }
+        .dh-port-num { font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem; font-weight: 700; color: var(--text-main); }
+        .dh-port-meta { font-size: 0.66rem; color: var(--text-muted); }
+
+        /* Universal ZTNA: clickable sequence steps + inline log highlight */
+        .dh-seq .fa-row { cursor: pointer; }
+        .dh-seq .fa-row:hover .fa-hit { fill: rgba(56,189,248,.10); }
+        .dh-seq .fa-row.sel .fa-hit { fill: rgba(56,189,248,.18); }
+        .dh-seq-detail {
+            margin-top: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 0.4rem;
+            background: var(--surface-soft); font-size: 0.78rem; color: var(--text-muted);
+        }
+        .dh-seq-detail .dl { font-weight: 700; color: var(--text-main); }
+        .dh-seq-detail .ts { font-family: ui-monospace, Consolas, monospace; color: var(--text-muted); }
+        .dh-seq-log {
+            margin-top: 0.35rem; max-height: 320px; overflow: auto;
+            background: #0b1220; border: 1px solid rgba(56,189,248,.18); border-radius: 0.4rem;
+            padding: 0.4rem 0.5rem; font-size: 0.7rem; line-height: 1.55;
+            font-family: ui-monospace, Consolas, monospace;
+        }
+        .dh-seq-log .ln {
+            white-space: pre-wrap; word-break: break-word; color: #8b97a8;
+            padding: 1px 6px; border-left: 2px solid transparent;
+        }
+        .dh-seq-log .ln.hl {
+            background: rgba(251,191,36,.30); color: #fef3c7; font-weight: 600;
+            border-left: 3px solid #fbbf24;
+        }
+        .dh-seq-log .ln.hlerr {
+            background: rgba(239,68,68,.38); color: #fff1f2; font-weight: 600;
+            border-left: 3px solid #ef4444;
+        }
+
+        /* Universal ZTNA: legends for the stage strip and the sequence arrows */
+        .dh-legend {
+            display: flex; flex-wrap: wrap; gap: 0.35rem 1.1rem;
+            margin: 0.45rem 0 0.2rem; font-size: 0.74rem; color: var(--text-muted);
+        }
+        .dh-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+        .dh-legend .dh-strip-dot { width: 14px; height: 14px; font-size: 8px; }
+        .dh-legend-seq {
+            margin: 0.4rem 0 0; padding: 0.4rem 0.55rem; border-radius: 0.4rem;
+            background: var(--surface-soft);
+        }
+        .dh-legend-glyph { font-weight: 700; font-size: 0.9rem; line-height: 1; }
+        .dh-legend-glyph.is-o { color: #0284c7; }
+        .dh-legend-glyph.is-i { color: #059669; }
+        .dh-legend-glyph.is-s { color: #b45309; }
+        .dh-legend-glyph.is-e { color: #dc2626; }
+        .theme-darker .dh-legend-glyph.is-o { color: #7dd3fc; }
+        .theme-darker .dh-legend-glyph.is-i { color: #6ee7b7; }
+        .theme-darker .dh-legend-glyph.is-s { color: #fcd34d; }
+        .theme-darker .dh-legend-glyph.is-e { color: #fca5a5; }
+
+.dh-issue-metric {
+    margin-top: .4rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .74rem;
+    color: var(--text-muted);
+}

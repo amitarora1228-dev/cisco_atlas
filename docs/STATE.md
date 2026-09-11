@@ -5,7 +5,7 @@ finish.** It is the one place that says what exists, where each thing stands, an
 what is known to be broken. If it disagrees with any other document, this file is
 right and the other one is stale.
 
-**Last updated:** 2026-08-14 · branch `main` · head `82b4811`+ (detection engine cross-validated against tshark: 102 checks, four re-runnable harnesses)
+**Last updated:** 2026-09-10 · branch `main` · head `c19a6b6` (RA VPN certificate authentication; correlation join keys and coverage)
 
 ---
 
@@ -193,7 +193,9 @@ fallback, but PATH is the supported arrangement.
 & .venv\Scripts\python.exe -m ruff check packages\atlas_core apps tools
 ```
 
-**55 tests pass, lint clean** as of the head commit.
+**123 tests pass** as of the head commit. `ruff` reports two long-standing
+style errors in `tools/phase0/` (`UP038` in `dpkt_extractor.py`, `B905` in
+`gate_e.py`); the packages and apps are clean.
 
 ---
 
@@ -325,6 +327,11 @@ session, what no single artefact can:
 | Tunnel ↔ request | time and multiplexing | **Associated** — many hosts share one tunnel, so a request cannot be attributed to a particular tunnel |
 
 These are not presented as equal, in the UI or the payload.
+
+`_join_keys()` and `_coverage()` in `flows.py` surface this in the correlation
+view as **"What ties these artefacts together"**: each key is named with what
+carries it, what it actually joined here, and its limit, alongside how much of
+the session the capture covers. Shipped in `c19a6b6`.
 
 ### Following one flow end to end
 The ZTA log writes **two** differently punctuated identifiers, and only one of

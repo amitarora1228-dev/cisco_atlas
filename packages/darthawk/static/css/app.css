@@ -233,6 +233,25 @@ body.dh-app {
         }
         .dh-evrow:last-child { border-bottom: none; }
         .dh-evrow-main { display: flex; align-items: center; gap: 0.65rem; }
+        .dh-vpn-certtable {
+            width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.82rem;
+        }
+        .dh-vpn-certtable th {
+            text-align: left; padding: 0.4rem 0.6rem; font-size: 0.7rem; letter-spacing: 0.06em;
+            text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-main);
+        }
+        .dh-vpn-certtable td {
+            padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border-main);
+            color: var(--text-main); vertical-align: top; word-break: break-word;
+        }
+        .dh-vpn-certtable td:nth-child(2) {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.76rem;
+        }
+        .dh-vpn-certtable tbody tr { border-left: 3px solid transparent; }
+        .dh-vpn-certtable tbody tr.is-refused td:last-child { color: #ef4444; font-weight: 700; }
+        .dh-vpn-certtable tbody tr.is-accepted td:last-child { color: #10b981; font-weight: 700; }
+        .dh-vpn-certtable tbody tr.is-mixed td:last-child { color: #f59e0b; font-weight: 700; }
+        .dh-vpn-certtable tbody tr.is-not-offered td { color: var(--text-muted); }
         .dh-evrow-icon { flex: none; width: 1.5rem; text-align: center; font-size: 1rem; line-height: 1.4; }
         .dh-evrow-text { flex: 1 1 auto; min-width: 0; font-size: 0.9rem; line-height: 1.45; color: var(--text-main); }
         .dh-evrow-count {
@@ -1021,3 +1040,55 @@ body.dh-app {
     font-size: .74rem;
     color: var(--text-muted);
 }
+
+.dh-chain { margin-top: 0.6rem; }
+.dh-chain-node { display: flex; gap: 0.55rem; align-items: stretch; }
+.dh-chain-marker { width: 0.9rem; display: flex; justify-content: center; padding-top: 0.75rem; }
+.dh-chain-dot {
+    width: 0.55rem; height: 0.55rem; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 3px var(--surface-soft);
+}
+.dh-chain-node.is-leaf .dh-chain-dot { background: #ef4444; }
+.dh-chain-body {
+    flex: 1; min-width: 0;
+    border: 1px solid var(--border-main); border-left: 3px solid var(--accent);
+    border-radius: 0.5rem; padding: 0.5rem 0.7rem; background: var(--surface-card);
+}
+.dh-chain-node.is-leaf .dh-chain-body { border-left-color: #ef4444; }
+.dh-chain-head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.15rem; }
+.dh-chain-role {
+    font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-muted);
+}
+.dh-chain-tag {
+    font-size: 0.62rem; padding: 0.05rem 0.35rem; border-radius: 0.25rem;
+    border: 1px solid var(--border-main); color: var(--text-muted);
+}
+.dh-chain-cn {
+    font-family: ui-monospace, Consolas, monospace; font-size: 0.82rem;
+    font-weight: 600; color: var(--text-main); word-break: break-all;
+}
+.dh-chain-dn {
+    font-family: ui-monospace, Consolas, monospace; font-size: 0.69rem;
+    color: var(--text-muted); word-break: break-all; margin-top: 0.1rem;
+}
+.dh-chain-note { margin-top: 0.35rem; font-size: 0.73rem; font-weight: 600; }
+.dh-chain-note.is-match { color: #0f766e; }
+.dh-chain-note.is-diff { color: #b91c1c; }
+.dh-chain-link {
+    margin-left: 0.42rem; padding: 0.15rem 0 0.15rem 0.85rem;
+    border-left: 2px dashed var(--border-main);
+    font-size: 0.66rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+}
+.theme-darker .dh-chain-note.is-match { color: #5eead4; }
+.theme-darker .dh-chain-note.is-diff { color: #fca5a5; }
+
+.dh-allclear-row { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.78rem; color: var(--text-muted); }
+.dh-allclear-name { font-weight: 700; color: var(--text-main); white-space: nowrap; }
+
+.dh-devnotice {
+    border: 1px solid var(--border-main); border-left: 3px solid #f59e0b;
+    border-radius: 0.6rem; padding: 1rem 1.1rem; background: var(--surface-card);
+}
+.dh-devnotice-title { font-weight: 800; font-size: 0.95rem; color: var(--text-main); margin-bottom: 0.4rem; }
+.dh-devnotice-body { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.35rem; line-height: 1.5; }

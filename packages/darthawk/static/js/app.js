@@ -154,6 +154,9 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         const orgIdPreview = document.getElementById('orgIdPreview');
         const orgIdPreviewText = document.getElementById('orgIdPreviewText');
         const uploadForm = document.getElementById('uploadForm');
+        const moduleDevNotice = document.getElementById('moduleDevNotice');
+        const moduleDevNoticeName = document.getElementById('moduleDevNoticeName');
+        const MODULES_IN_DEVELOPMENT = ['Umbrella', 'EDLP'];
         const feedbackPanel = document.getElementById('feedbackPanel');
         const feedbackForm = document.getElementById('feedbackForm');
         const feedbackOs = document.getElementById('feedbackOs');
@@ -1575,8 +1578,8 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
         // The upload preview is ZTA-shaped, so it is only shown for modules it describes.
         function syncZtaSummaryForModule() {
             const selected = document.querySelector('input[name="module"]:checked');
-            const isUztna = selected && selected.value === 'UZTNA';
-            if (isUztna || !lastZtaPreviewSignals || !lastZtaPreviewSignals.available) {
+            const describesModule = !selected || (selected.value !== 'UZTNA' && selected.value !== 'VPN');
+            if (!describesModule || !lastZtaPreviewSignals || !lastZtaPreviewSignals.available) {
                 resetZtaSummary();
                 return;
             }
@@ -4080,6 +4083,359 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             return wrap;
         }
 
+        function uztnaCertCn(dn) {
+            const match = /(?:^|[\/,])CN=([^\/,]+)/i.exec(dn || '');
+            return match ? match[1].trim() : (dn || '').replace(/^\//, '');
+        }
+
+        // The agent prints the chain in the order it received it, not root-first.
+        function uztnaOrderCertChain(chain) {
+            const nodes = chain.map(function (link) {
+                return { subject: link.subject || '', issuer: link.issuer || '' };
+            });
+            const root = nodes.filter(function (n) { return n.subject && n.subject === n.issuer; })[0];
+            if (!root) return nodes;
+
+            const ordered = [root];
+            const seen = {};
+            seen[root.subject] = true;
+            for (let guard = 0; guard < nodes.length; guard++) {
+                const current = ordered[ordered.length - 1];
+                const next = nodes.filter(function (n) {
+                    return !seen[n.subject] && n.issuer === current.subject;
+                })[0];
+                if (!next) break;
+                seen[next.subject] = true;
+                ordered.push(next);
+            }
+            nodes.forEach(function (n) { if (!seen[n.subject]) { ordered.push(n); } });
+            return ordered;
+        }
+
+        function buildUztnaCertChain(chain, requestedName) {
+            const wrap = document.createElement('div');
+            wrap.className = 'dh-chain';
+            const label = document.createElement('div');
+            label.className = 'dh-issue-block-label';
+            label.textContent = 'Certificate chain presented';
+            wrap.appendChild(label);
+
+            const ordered = uztnaOrderCertChain(chain);
+            ordered.forEach(function (node, i) {
+                const isRoot = node.subject === node.issuer;
+                const isLeaf = i === ordered.length - 1;
+                const cn = uztnaCertCn(node.subject);
+
+                const row = document.createElement('div');
+                row.className = 'dh-chain-node' + (isLeaf ? ' is-leaf' : '');
+
+                const marker = document.createElement('div');
+                marker.className = 'dh-chain-marker';
+                marker.innerHTML = '<span class="dh-chain-dot"></span>';
+                row.appendChild(marker);
+
+                const body = document.createElement('div');
+                body.className = 'dh-chain-body';
+
+                const head = document.createElement('div');
+                head.className = 'dh-chain-head';
+                const role = document.createElement('span');
+                role.className = 'dh-chain-role';
+                role.textContent = isLeaf ? 'Server certificate' : isRoot ? 'Root CA' : 'Intermediate CA';
+                head.appendChild(role);
+                if (isRoot) {
+                    const tag = document.createElement('span');
+                    tag.className = 'dh-chain-tag';
+                    tag.textContent = 'self-signed';
+                    head.appendChild(tag);
+                }
+                body.appendChild(head);
+
+                const cnEl = document.createElement('div');
+                cnEl.className = 'dh-chain-cn';
+                cnEl.textContent = cn;
+                body.appendChild(cnEl);
+
+                if (node.subject && node.subject !== '/CN=' + cn) {
+                    const dn = document.createElement('div');
+                    dn.className = 'dh-chain-dn';
+                    dn.textContent = node.subject;
+                    body.appendChild(dn);
+                }
+
+                if (isLeaf && requestedName) {
+                    const note = document.createElement('div');
+                    const matches = cn === requestedName;
+                    note.className = 'dh-chain-note ' + (matches ? 'is-match' : 'is-diff');
+                    note.textContent = matches
+                        ? '✓ CN equals the name the client requested (' + requestedName + '), so the mismatch is not a typo - check the SAN'
+                        : '✕ the client requested ' + requestedName;
+                    body.appendChild(note);
+                }
+
+                row.appendChild(body);
+                wrap.appendChild(row);
+
+                if (!isLeaf) {
+                    const link = document.createElement('div');
+                    link.className = 'dh-chain-link';
+                    link.textContent = 'signs';
+                    wrap.appendChild(link);
+                }
+            });
+            return wrap;
+        }
+
+        const vpnSummaryWrap = document.getElementById('vpnSummaryWrap');
+        const vpnSummarySub = document.getElementById('vpnSummarySub');
+        const vpnSummaryHeadline = document.getElementById('vpnSummaryHeadline');
+        const vpnSummaryVerdict = document.getElementById('vpnSummaryVerdict');
+        const vpnSummaryCards = document.getElementById('vpnSummaryCards');
+        const vpnSummaryAttempts = document.getElementById('vpnSummaryAttempts');
+        const vpnSummaryCertificates = document.getElementById('vpnSummaryCertificates');
+
+        const VPN_STAGE_LABELS = {
+            requested: 'Connection requested',
+            server_cert: 'Server certificate verified',
+            cert_requested: 'Client certificate requested by gateway',
+            cert_selected: 'Client certificate offered',
+            issuer_rejected: 'Issuer not in the gateway’s CA list',
+            mca: 'Multiple certificate authentication',
+            cert_auth_failed: 'Client found no usable certificate',
+            gateway_error: 'Gateway verdict',
+            tunnel: 'Tunnel establishing',
+            attempt_failed: 'Attempt failed'
+        };
+        const VPN_STAGE_TONE = {
+            issuer_rejected: 'fail',
+            cert_auth_failed: 'fail',
+            gateway_error: 'fail',
+            attempt_failed: 'fail',
+            tunnel: 'ok',
+            server_cert: 'ok'
+        };
+
+        function resetVpnSummary() {
+            [vpnSummarySub, vpnSummaryHeadline, vpnSummaryVerdict, vpnSummaryCards,
+                vpnSummaryAttempts, vpnSummaryCertificates].forEach(function (el) {
+                    if (el) { el.textContent = ''; }
+                });
+            if (vpnSummaryWrap) { vpnSummaryWrap.classList.add('hidden'); }
+        }
+
+        function vpnTextRow(className, text) {
+            const el = document.createElement('div');
+            el.className = className;
+            el.textContent = text;
+            return el;
+        }
+
+        // renderZtaSummary keeps its own copy of this scoped to itself.
+        function vpnAppendTextWithLinks(parent, text) {
+            const pattern = /https?:\/\/[^\s)]+/g;
+            let cursor = 0;
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                if (match.index > cursor) {
+                    parent.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+                }
+                const link = document.createElement('a');
+                link.href = match[0];
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.className = 'dh-suggest-link';
+                link.textContent = match[0];
+                parent.appendChild(link);
+                cursor = match.index + match[0].length;
+            }
+            if (cursor < text.length) {
+                parent.appendChild(document.createTextNode(text.slice(cursor)));
+            }
+        }
+
+        function renderVpnSummary(summary) {
+            resetVpnSummary();
+            if (!summary || !vpnSummaryWrap) { return; }
+
+            if (!summary.available || !(summary.attempts || []).length) {
+                const box = document.createElement('div');
+                box.className = 'dh-snap-verdict';
+                box.appendChild(vpnTextRow('dh-snap-verdict-summary',
+                    summary.reason || 'No certificate authentication activity in this bundle.'));
+                vpnSummaryVerdict.appendChild(box);
+                vpnSummaryWrap.classList.remove('hidden');
+                return;
+            }
+
+            const verdict = summary.verdict || {};
+            const level = verdict.level || 'unknown';
+            const banner = document.createElement('div');
+            banner.className = 'dh-snap-verdict is-' + level;
+            banner.appendChild(vpnTextRow('dh-snap-verdict-title',
+                level === 'problem' ? '✕ Certificate authentication failing'
+                    : level === 'degraded' ? '⚠ Certificate authentication intermittent'
+                        : '✓ Certificate authentication healthy'));
+            banner.appendChild(vpnTextRow('dh-snap-verdict-summary', verdict.summary || ''));
+            vpnSummaryVerdict.appendChild(banner);
+
+            vpnSummarySub.textContent = summary.sub || '';
+            vpnSummaryHeadline.textContent = summary.headline || '';
+
+            (summary.cards || []).forEach(function (card) {
+                const box = document.createElement('div');
+                box.className = 'dh-issue sev-' + (card.severity === 'critical' ? 'critical'
+                    : card.severity === 'warning' ? 'warning' : 'info');
+
+                const head = document.createElement('div');
+                head.className = 'dh-issue-head';
+                head.appendChild(vpnTextRow('dh-issue-title', card.label || ''));
+                if (card.chip) { head.appendChild(vpnTextRow('dh-issue-badge', card.chip)); }
+                box.appendChild(head);
+
+                if (card.summary) { box.appendChild(vpnTextRow('dh-issue-summary', card.summary)); }
+                if (card.metric) { box.appendChild(vpnTextRow('dh-issue-metric', card.metric)); }
+
+                [['What it means', card.meaning], ['Impact', card.impact]].forEach(function (pair) {
+                    if (!pair[1]) { return; }
+                    const block = document.createElement('div');
+                    block.className = 'dh-issue-block';
+                    block.appendChild(vpnTextRow('dh-issue-block-label', pair[0]));
+                    block.appendChild(vpnTextRow('dh-issue-block-body', pair[1]));
+                    box.appendChild(block);
+                });
+
+                if ((card.groups || []).length) {
+                    const list = document.createElement('div');
+                    list.className = 'dh-evlist';
+                    card.groups.forEach(function (group) {
+                        const row = document.createElement('div');
+                        row.className = 'dh-evrow';
+                        const main = document.createElement('div');
+                        main.className = 'dh-evrow-main';
+                        main.appendChild(vpnTextRow('dh-evrow-text', group.label || ''));
+                        if (group.count) {
+                            main.appendChild(vpnTextRow('dh-evrow-count', group.count + '×'));
+                        }
+                        row.appendChild(main);
+                        list.appendChild(row);
+                    });
+                    box.appendChild(list);
+                }
+
+                if ((card.suggestions || []).length) {
+                    const suggest = document.createElement('div');
+                    suggest.className = 'dh-suggest';
+                    suggest.appendChild(vpnTextRow('dh-suggest-label', 'Suggested next steps'));
+                    const ul = document.createElement('ul');
+                    card.suggestions.forEach(function (text) {
+                        const li = document.createElement('li');
+                        vpnAppendTextWithLinks(li, String(text));
+                        ul.appendChild(li);
+                    });
+                    suggest.appendChild(ul);
+                    box.appendChild(suggest);
+                }
+
+                vpnSummaryCards.appendChild(box);
+            });
+
+            const attemptsHead = document.createElement('div');
+            attemptsHead.className = 'dh-snap-section';
+            attemptsHead.textContent = 'Authentication attempts (' + summary.attempts.length + ')';
+            vpnSummaryAttempts.appendChild(attemptsHead);
+
+            summary.attempts.forEach(function (attempt) {
+                const box = document.createElement('div');
+                box.className = 'dh-issue sev-' + (attempt.outcome === 'failed' ? 'critical' : 'info');
+
+                const head = document.createElement('div');
+                head.className = 'dh-issue-head';
+                head.appendChild(vpnTextRow('dh-issue-title',
+                    'Attempt ' + attempt.index + ' · ' + (attempt.target || 'target not logged')));
+                head.appendChild(vpnTextRow('dh-issue-badge', attempt.outcome));
+                box.appendChild(head);
+
+                box.appendChild(vpnTextRow('dh-issue-metric',
+                    [attempt.started, attempt.auth_mode,
+                        attempt.certs_offered.length + ' offered',
+                        attempt.certs_rejected.length + ' refused'].filter(Boolean).join(' · ')));
+
+                if (attempt.failure_reason) {
+                    box.appendChild(vpnTextRow('dh-issue-summary', attempt.failure_reason));
+                }
+
+                const seen = {};
+                const ladder = document.createElement('div');
+                ladder.className = 'dh-evlist';
+                (attempt.events || []).forEach(function (event) {
+                    const key = event.stage + '|' + event.detail;
+                    if (seen[key]) { seen[key].count += 1; return; }
+                    const row = document.createElement('div');
+                    row.className = 'dh-evrow';
+                    const tone = VPN_STAGE_TONE[event.stage] || 'info';
+                    const main = document.createElement('div');
+                    main.className = 'dh-evrow-main';
+                    main.appendChild(vpnTextRow('dh-evrow-icon',
+                        tone === 'fail' ? '✕' : tone === 'ok' ? '✓' : '•'));
+                    main.appendChild(vpnTextRow('dh-evrow-text',
+                        (VPN_STAGE_LABELS[event.stage] || event.stage) + ' — ' + (event.detail || '')));
+                    const count = vpnTextRow('dh-evrow-count', '1×');
+                    main.appendChild(count);
+                    row.appendChild(main);
+                    row.appendChild(vpnTextRow('dh-flow-timeframe', '⏱ ' + (event.timestamp || '')));
+                    seen[key] = { count: 1, el: count };
+                    ladder.appendChild(row);
+                });
+                Object.keys(seen).forEach(function (key) {
+                    seen[key].el.textContent = seen[key].count + '×';
+                });
+                box.appendChild(ladder);
+                vpnSummaryAttempts.appendChild(box);
+            });
+
+            if ((summary.certificates || []).length) {
+                const certHead = document.createElement('div');
+                certHead.className = 'dh-snap-section';
+                certHead.textContent = 'Certificates in the endpoint’s stores ('
+                    + summary.certificates.length + ')';
+                vpnSummaryCertificates.appendChild(certHead);
+
+                const table = document.createElement('table');
+                table.className = 'dh-vpn-certtable';
+                const thead = document.createElement('thead');
+                const hrow = document.createElement('tr');
+                ['Common name', 'Issuer', 'Store', 'Offered', 'Refused', 'Verdict'].forEach(function (label) {
+                    const th = document.createElement('th');
+                    th.textContent = label;
+                    hrow.appendChild(th);
+                });
+                thead.appendChild(hrow);
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                summary.certificates.forEach(function (cert) {
+                    const tr = document.createElement('tr');
+                    let state = 'not offered';
+                    if (cert.rejected && cert.rejected >= cert.offered) { state = 'refused'; }
+                    else if (cert.rejected) { state = 'mixed'; }
+                    else if (cert.offered) { state = 'accepted'; }
+                    tr.className = 'is-' + state.replace(' ', '-');
+                    [cert.common_name, cert.issuer || 'unknown', (cert.stores || []).join(', '),
+                        String(cert.offered || 0), String(cert.rejected || 0), state]
+                        .forEach(function (value) {
+                            const td = document.createElement('td');
+                            td.textContent = value;
+                            tr.appendChild(td);
+                        });
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                vpnSummaryCertificates.appendChild(table);
+            }
+
+            vpnSummaryWrap.classList.remove('hidden');
+        }
+
         function renderUztnaSummary(summary) {
             resetUztnaSummary();
             if (!summary || !uztnaSummaryWrap || !summary.available) {
@@ -4113,7 +4469,15 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     : summary.episode_count + ' redirects';
             }
 
-            (summary.assessment || []).forEach(function (card) {
+            const allCards = summary.assessment || [];
+            const issueCards = allCards.filter(function (c) {
+                return c.severity === 'critical' || c.severity === 'warning';
+            });
+            const healthyCards = allCards.filter(function (c) {
+                return c.severity !== 'critical' && c.severity !== 'warning';
+            });
+
+            issueCards.forEach(function (card) {
                 const box = document.createElement('div');
                 box.className = 'dh-issue sev-' + (card.severity === 'critical' ? 'critical'
                     : card.severity === 'warning' ? 'warning' : 'info');
@@ -4151,18 +4515,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 }
 
                 if (card.chain && card.chain.length) {
-                    const chain = document.createElement('div');
-                    chain.className = 'dh-certchain';
-                    chain.innerHTML = '<div class="dh-issue-block-label">Certificate chain presented</div>';
-                    card.chain.forEach(function (link, i) {
-                        const row = document.createElement('div');
-                        row.className = 'dh-certlink';
-                        row.innerHTML = '<span class="dh-certlink-idx">' + (i === 0 ? 'leaf' : i) + '</span>'
-                            + '<code>' + link.subject + '</code>'
-                            + '<span class="dh-certlink-by">issued by</span><code>' + link.issuer + '</code>';
-                        chain.appendChild(row);
-                    });
-                    box.appendChild(chain);
+                    box.appendChild(buildUztnaCertChain(card.chain, card.requested_name));
                 }
 
                 if (card.suggestions && card.suggestions.length) {
@@ -4180,6 +4533,53 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 }
                 uztnaSummaryCards.appendChild(box);
             });
+
+            if (healthyCards.length) {
+                const clear = document.createElement('div');
+                clear.className = 'dh-allclear';
+
+                const clearHead = document.createElement('div');
+                clearHead.className = 'dh-allclear-head';
+                const clearTitle = document.createElement('span');
+                clearTitle.className = 'dh-allclear-title';
+                clearTitle.textContent = '✓ ' + healthyCards.length
+                    + (healthyCards.length === 1 ? ' check healthy' : ' checks healthy');
+                clearHead.appendChild(clearTitle);
+                healthyCards.forEach(function (card) {
+                    const chip = document.createElement('span');
+                    chip.className = 'dh-chip is-info';
+                    chip.textContent = card.label + (card.chip ? ' · ' + card.chip : '');
+                    clearHead.appendChild(chip);
+                });
+                const clearToggle = document.createElement('button');
+                clearToggle.type = 'button';
+                clearToggle.className = 'dh-allclear-toggle';
+                clearToggle.textContent = 'Details';
+                clearHead.appendChild(clearToggle);
+                clear.appendChild(clearHead);
+
+                const clearDetails = document.createElement('div');
+                clearDetails.className = 'dh-allclear-details';
+                healthyCards.forEach(function (card) {
+                    const row = document.createElement('div');
+                    row.className = 'dh-allclear-row';
+                    const name = document.createElement('span');
+                    name.className = 'dh-allclear-name';
+                    name.textContent = card.label;
+                    row.appendChild(name);
+                    const text = document.createElement('span');
+                    text.textContent = card.summary || '';
+                    row.appendChild(text);
+                    clearDetails.appendChild(row);
+                });
+                clear.appendChild(clearDetails);
+
+                clearToggle.addEventListener('click', function () {
+                    const open = clearDetails.classList.toggle('open');
+                    clearToggle.textContent = open ? 'Hide details' : 'Details';
+                });
+                uztnaSummaryCards.appendChild(clear);
+            }
 
             const episodes = summary.episodes || [];
             if (episodes.length) {
@@ -6188,6 +6588,43 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     `Cisco Secure Client Version: ${resolvedBaseVersion || 'Unknown'}`
                 );
 
+                const selectedModuleForPreview = document.querySelector('input[name="module"]:checked');
+                const isVpnPreview = !!selectedModuleForPreview && selectedModuleForPreview.value === 'VPN';
+
+                if (isVpnPreview) {
+                    previewLines.push(`AnyConnect VPN Module Version: ${vpnVersion || 'Unknown'}`);
+                    previewLines.push(formatLogWindow('VPN Logs', data.vpn_logs));
+
+                    const vpnSignals = data.vpn_preview_signals || {};
+                    const prefs = vpnSignals.preferences || {};
+                    previewLines.push(`Last Connected Profile: ${prefs.default_host || 'Not found'}`);
+                    if (prefs.default_user) {
+                        previewLines.push(`Default User: ${prefs.default_user}`);
+                    }
+                    previewLines.push(
+                        `Pinned Client Certificate: ${prefs.client_certificate_thumbprint || 'None'}`
+                    );
+                    previewLines.push(
+                        `Pinned Multiple-Certificate Thumbprints: ${prefs.multiple_client_certificate_thumbprints || 'None'}`
+                    );
+
+                    const profiles = vpnSignals.profiles || [];
+                    previewLines.push(`VPN Profiles: ${profiles.length || 'None found'}`);
+                    profiles.forEach((profile) => {
+                        (profile.hosts || []).forEach((host) => {
+                            const name = host.name || '(unnamed host entry)';
+                            const address = host.address ? ` -> ${host.address}` : '';
+                            const group = host.user_group ? ` [group ${host.user_group}]` : '';
+                            previewLines.push(`  - ${name}${address}${group}`);
+                        });
+                        previewLines.push(
+                            `      ${profile.file}: certificate matching `
+                            + `${profile.certificate_match ? 'configured' : 'NOT configured'}`
+                            + `, automatic selection ${profile.automatic_cert_selection}`
+                        );
+                    });
+                } else {
+
                 const hasComparableBases = ztaBaseVersion && vpnBaseVersion;
                 const shouldShowSeparateModuleVersions = hasComparableBases && ztaBaseVersion !== vpnBaseVersion;
 
@@ -6242,6 +6679,9 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                 const duoDetailedEnabled = Boolean(data.duo_desktop_detailed_logging_enabled);
                 previewLines.push(`Duo Detailed Diagnostics Enabled -- ${duoDetailedEnabled && duoUserFolders.length ? 'True' : 'False'}`);
                 previewLines.push(formatLogWindow('Duo Desktop Logs', data.duo_logs));
+
+                }
+
                 if (data.lightweight_inspect) {
                     previewLines.push('Preview Mode: Lightweight (full log-window scan skipped for speed)');
                 }
@@ -6250,7 +6690,7 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                     orgIdPreviewText.textContent = previewLines.join('\n');
                 }
 
-                if (data.zta_preview_signals && data.zta_preview_signals.available) {
+                if (!isVpnPreview && data.zta_preview_signals && data.zta_preview_signals.available) {
                     lastZtaPreviewSignals = data.zta_preview_signals;
                 } else {
                     lastZtaPreviewSignals = null;
@@ -6450,6 +6890,22 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
             const selected = document.querySelector('input[name="module"]:checked');
             updateModuleButtonsVisibility(selected ? selected.id : '');
             syncZtaSummaryForModule();
+
+            const inDevelopment = !!selected && MODULES_IN_DEVELOPMENT.indexOf(selected.value) !== -1;
+            if (moduleDevNotice) {
+                moduleDevNotice.classList.toggle('hidden', !inDevelopment);
+                if (inDevelopment && moduleDevNoticeName) {
+                    moduleDevNoticeName.textContent = selected.value;
+                }
+            }
+            if (uploadForm) {
+                uploadForm.classList.toggle('hidden', inDevelopment);
+            }
+            if (inDevelopment) {
+                if (resultArea) { resultArea.classList.add('hidden'); }
+                return;
+            }
+
             if (uztnaOptions) {
                 uztnaOptions.classList.toggle('hidden', !(selected && selected.value === 'UZTNA'));
             }
@@ -7594,6 +8050,13 @@ const moduleRadios = document.querySelectorAll('input[name="module"]');
                         setResultOutputPanelVisibility(false);
                     } else {
                         resetUztnaSummary();
+                    }
+
+                    if (moduleInput.value === 'VPN' && data.vpn_summary) {
+                        renderVpnSummary(data.vpn_summary);
+                        setResultOutputPanelVisibility(false);
+                    } else {
+                        resetVpnSummary();
                     }
 
                     if (moduleInput.value === 'Duo Desktop' && data.duo_posture_flow_summary) {

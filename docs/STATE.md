@@ -219,7 +219,82 @@ fallback, but PATH is the supported arrangement.
 | Time alignment between log and packet clocks | **Done for connections whose handshake was captured** — derived, reported as an upper bound, never silently applied |
 | Unified findings model | **Not started** — the keystone for Phase 2 |
 | Structured result contract for the bundle engine | **Not started** — blocks everything above |
+| RA VPN bundle module | **Certificate authentication done**; other RA VPN checks not started. See below |
 | Auth, tenant isolation, retention | **Not started** — required before hosting |
+
+### RA VPN module (bundle engine)
+
+The `VPN` radio had existed in the rail since before this work with no analysis
+behind it. It is now a working module: removed from `MODULES_IN_DEVELOPMENT`,
+labelled **RA VPN**, and it renders a certificate-authentication summary from an
+uploaded bundle. Only certificate authentication is implemented.
+
+**Log reader.** `find_vpn_log_files` / `parse_vpn_log_file` /
+`collect_vpn_log_records`. The agent writes two unrelated formats, both
+normalised to one record shape (`timestamp`, `level`, `source`, `process`,
+`function`, `file`, `file_line`, `message`, `path`, `log_line`):
+
+- **Windows** `AnyConnect VPN/Logs/AnyConnectVPN.txt` — multi-line blocks split
+  by a row of asterisks, `Date:`/`Time:`/`Type:`/`Source:` headers.
+- **macOS** `AnyConnect VPN/Logs/AnyConnectVPN.log` — a `log show` dump, one
+  record per line, ISO timestamp first.
+
+Format is chosen by **what parses**, not by extension. `acsock.log` sits in the
+same folder but belongs to `com.cisco.anyconnect.acsock` and carries ZTA
+traffic, so it is excluded; including it added 390 foreign records on the macOS
+sample.
+
+**Certificate authentication.** `analyze_vpn_cert_auth` segments the record
+stream into attempts and `build_vpn_summary_payload` interprets them. Two traps
+were paid for here:
+
+- **Never key on the log source.** The TechZone articles document these events
+  under `csc_vpnapi`; the macOS bundle emits them under `csc_vpnapishim` and the
+  Windows ones under `csc_vpnapishim` too. Every rule keys on **function and
+  message**.
+- **The management tunnel authenticates itself.** `vpnmgmttun` runs its own
+  `nextClientCert` sequence. On the macOS sample 6 of 8 enumeration events
+  belonged to it, not to the user's VPN. They are counted and excluded, never
+  folded into the user's ladder.
+
+Attempts are segmented on **terminal events** (gateway verdict, client giving
+up, tunnel establishing), not on the user's connect request — automatic
+reconnects never emit a connect request, so segmenting on it merges attempts.
+
+**Measured against `VPN-Component/` (both Windows 11, same user):**
+
+| Bundle | Verdict | Detail |
+|---|---|---|
+| `DARTBundle_0226_1355` | **problem** | 1 attempt, failed. 8 certificates offered, 5 refused, never connected |
+| `DARTBundle_0303_1526` | **degraded** | 8 attempts, 7 failed, 2 connected. Same 8 certificates, brute-forced repeatedly |
+
+Root cause in both: only `POPBEL-CA` is in the gateway's advertised CA list.
+Certificates from `Citizen CA` (Belgian eID), `GlobalSign`, `MS-Organization-Access`
+and two `Microsoft Intune` CAs all log `Issuer not found in CA Names from
+server`, then `certAuthHasFailed` → `No valid certificates available for
+authentication` → gateway `Certificate Validation Failure`.
+
+**Reference configuration** (both articles are Cisco-internal, Duo SSO):
+[single certificate](https://techzone.cisco.com/t5/Remote-Access-ZTNA-RAVPN/How-to-configure-certificate-based-authentication-for-AnyConnect/ta-p/9961572),
+[multiple certificate](https://techzone.cisco.com/t5/Remote-Access-ZTNA-RAVPN/How-to-configure-Multiple-certificate-based-authentication-for/ta-p/10003228).
+
+**The upload preview is module-aware.** It used to print ZTA enrollment and Duo
+fields whatever module was selected, which read as the wrong tool's output under
+RA VPN. `build_vpn_preview_signals` now supplies profiles, headends and
+preferences, and the preview branches on the selected module. The ZTA Health
+Snapshot is suppressed for RA VPN and UZTNA for the same reason.
+
+Trap: the Preferences folder holds **two** files and `os.walk` order is not
+defined. `preferences_global.xml` carries machine defaults with no thumbprint;
+the user-scoped `preferences.xml` carries `DefaultHostName` and
+`ClientCertificateThumbprint`. Reading whichever came first reported
+"Pinned Client Certificate: None" on a bundle that had one. The list is now
+sorted so non-global wins.
+
+**Not written yet:** session lifecycle, headend reachability and TLS/DTLS
+negotiation, split tunnelling, SAML and RADIUS authentication, posture, profile
+dump, intermittent-disconnect detection. No sample in the tree carries a RADIUS
+flow.
 
 ---
 

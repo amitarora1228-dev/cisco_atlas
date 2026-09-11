@@ -2004,6 +2004,17 @@
             var zta = el("td", "atlas-corr-cell");
             if (!row.zta) {
                 zta.appendChild(el("span", "atlas-corr-none", "not in log"));
+                if (row.zta_same_host) {
+                    zta.appendChild(el(
+                        "span",
+                        "atlas-corr-sub",
+                        "same host, other connection(s): " + row.zta_same_host.flows
+                            + (row.zta_same_host.window ? " at " + row.zta_same_host.window : "")
+                            + (row.zta_same_host.reasons.length
+                                ? " \u00b7 " + row.zta_same_host.reasons.join(", ")
+                                : "")
+                    ));
+                }
             } else {
                 zta.appendChild(el(
                     "span",
@@ -2052,6 +2063,41 @@
         return block;
     }
 
+    /* The answer to "is there nothing common to join on?" - with counts.
+     * Two strings do reach across the artefacts, and they do different jobs,
+     * so both are named along with what each one actually tied here. */
+    function focusKeys(trace) {
+        var keys = trace.keys || [];
+        if (!keys.length) return null;
+        var block = el("div", "atlas-corr-keys");
+        block.appendChild(el("h4", null, "What ties these artefacts together"));
+        keys.forEach(function (row) {
+            var card = el("div", "atlas-corr-key");
+            var head = el("div", "atlas-corr-key-head");
+            head.appendChild(el("span", "atlas-corr-key-name", row.key));
+            head.appendChild(el("span", "atlas-corr-key-src", row.carried_by));
+            card.appendChild(head);
+            card.appendChild(el("p", "atlas-corr-key-joined", row.joined));
+            card.appendChild(el("p", "atlas-corr-key-limit", row.limit));
+            block.appendChild(card);
+        });
+
+        var cov = trace.coverage;
+        if (cov) {
+            block.appendChild(el(
+                "p",
+                "atlas-corr-key-cover",
+                "Overlap: the capture covers " + cov.capture_seconds + " second(s) ("
+                    + cov.capture_span + "), while the agent's log names " + cov.agent_named
+                    + " connection(s) over " + cov.agent_hours + " hour(s) (" + cov.agent_span
+                    + "). " + cov.agent_named_inside_capture + " of them fall inside the "
+                    + "captured window - which is the ceiling on how many connections the "
+                    + "two can ever be joined on."
+            ));
+        }
+        return block;
+    }
+
     function correlateFocus(data) {
         var focus = data.focus;
         if (!focus || !focus.host) return null;
@@ -2068,6 +2114,8 @@
 
         if (focus.trace) {
             block.appendChild(focusSteps(focus.trace));
+            var keys = focusKeys(focus.trace);
+            if (keys) block.appendChild(keys);
             block.appendChild(focusChain(focus.trace));
         }
 
@@ -2449,6 +2497,19 @@
                 + "the order you upload them."
         ));
         view.appendChild(head);
+
+        // Still in development - capture upload stays off until the path is built.
+        var dev = el("div", "atlas-devnotice");
+        dev.appendChild(el("div", "atlas-devnotice-title", "This view is still in development"));
+        dev.appendChild(el(
+            "p",
+            null,
+            "Uploading captures here would not yet produce a usable path, so upload is "
+                + "disabled. Use Inspect for a single capture, or Correlation to follow one "
+                + "site across the artefacts you already have."
+        ));
+        view.appendChild(dev);
+        return view;
 
         var bar = el("div", "atlas-corr-bar");
         var input = el("input", "atlas-path-input");

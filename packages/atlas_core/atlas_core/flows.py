@@ -1139,7 +1139,10 @@ def _matches_focus(candidate: str, focus: str) -> bool:
 
 
 def _connection_trace(
-    flows: list[FlowCorrelation], scope: list[HostCorrelation], sources: dict[str, str]
+    flows: list[FlowCorrelation],
+    scope: list[HostCorrelation],
+    sources: dict[str, str],
+    session: SessionCorrelation,
 ) -> dict:
     """Follow one site through the three artefacts, in the order an engineer does.
 
@@ -1251,6 +1254,15 @@ def _connection_trace(
     ]
 
     connections = []
+    # What the agent knows about a *host*, for rows where the port join failed.
+    # Hostname is the one string all three artefacts carry, so it still ties the
+    # records together even when they are different connections - and saying
+    # "the agent logged this host, at another time" is a great deal more than
+    # saying nothing.
+    zta_by_host: dict[str, list[FlowCorrelation]] = defaultdict(list)
+    for flow in steered:
+        zta_by_host[normalise_host(flow.destination)].append(flow)
+
     # Worst first, then whatever the most artefacts agree on: a reader opening
     # this has a complaint, not a survey.
     order = {"problem": 0, "warning": 1, "info": 2}
@@ -1289,6 +1301,20 @@ def _connection_trace(
         if reason:
             outcome = f"Ended on {reason}. " + outcome
 
+        same_host = None
+        if app is None:
+            others = [f for f in zta_by_host.get(normalise_host(flow.destination), [])]
+            if others:
+                times = [f.app.first_seen for f in others if f.app.first_seen]
+                same_host = {
+                    "flows": len(others),
+                    "reasons": sorted({r for f in others for r in f.app.reasons}),
+                    "window": (
+                        f"{min(times).strftime('%H:%M:%S')}-{max(times).strftime('%H:%M:%S')}"
+                        if times else ""
+                    ),
+                }
+
         connections.append({
             "src_port": flow.src_port,
             "host": flow.destination,
@@ -1310,6 +1336,7 @@ def _connection_trace(
                 "last_seen": _iso(app.last_seen),
                 "tunnel": flow.tunnel.label if flow.tunnel is not None else "",
             },
+            "zta_same_host": same_host,
             "wire": None if wire is None else {
                 "label": wire.label,
                 "packets": wire.packets,
@@ -1325,7 +1352,123 @@ def _connection_trace(
             "basis": [b for b in (flow.wire_basis, flow.tunnel_basis) if b],
         })
 
-    return {"steps": steps, "connections": connections}
+    return {
+        "steps": steps,
+        "connections": connections,
+        "keys": _join_keys(flows, scope, sources),
+        "coverage": _coverage(session),
+    }
+
+
+def _coverage(session: SessionCorrelation) -> dict | None:
+    """How much of the same time the artefacts actually cover.
+
+    A join can only succeed where two artefacts recorded the same moment. When
+    one covers half a minute and the other covers a day and a half, almost
+    every per-connection join must fail - not because the key is wrong but
+    because there is nothing on the other side of it. This is the number that
+    explains an empty column, so it is measured rather than left to be
+    inferred from an absence.
+    """
+    wire_times = [
+        t
+        for f in session.flows
+        if f.wire is not None
+        for t in (f.wire.first_seen, f.wire.last_seen)
+        if t is not None
+    ]
+    agent_flows = [f for f in session.flows if f.app is not None]
+    agent_times = [
+        t for f in agent_flows for t in (f.app.first_seen, f.app.last_seen) if t is not None
+    ]
+    if not wire_times or not agent_times:
+        return None
+
+    lo, hi = min(wire_times), max(wire_times)
+    inside = sum(
+        1 for f in agent_flows if f.app.first_seen and lo <= f.app.first_seen <= hi
+    )
+    return {
+        "capture_span": f"{lo.strftime('%H:%M:%S')}-{hi.strftime('%H:%M:%S')}",
+        "capture_seconds": round((hi - lo).total_seconds()),
+        "agent_span": (
+            f"{min(agent_times).strftime('%Y-%m-%d %H:%M')}"
+            f" - {max(agent_times).strftime('%Y-%m-%d %H:%M')}"
+        ),
+        "agent_hours": round(
+            (max(agent_times) - min(agent_times)).total_seconds() / 3600, 1
+        ),
+        "agent_named": len(agent_flows),
+        "agent_named_inside_capture": inside,
+    }
+
+
+def _join_keys(
+    flows: list[FlowCorrelation], scope: list[HostCorrelation], sources: dict[str, str]
+) -> list[dict]:
+    """Name every string the artefacts share, and say what each one tied.
+
+    "Is there nothing common to join on?" is the right question to ask of a
+    correlation, and it deserves an answer with counts rather than a shrug.
+    There are two such strings and they do different jobs: the **hostname**
+    reaches all three artefacts but names a destination rather than a
+    connection, and the **source port** names a connection but only the agent
+    and the capture record it. Neither is a weaker version of the other, so
+    both are reported, each with what it actually joined here.
+    """
+    keys: list[dict] = []
+
+    host_har = sum(1 for h in scope if h.requests)
+    host_wire = sum(1 for h in scope if h.local_flows or h.direct_flows)
+    host_zta = len({normalise_host(f.destination) for f in flows if f.app is not None})
+    keys.append({
+        "key": "Hostname",
+        "carried_by": "HAR host, ZTA log destination, TLS SNI in the capture",
+        "joined": (
+            f"{len(scope)} host(s) in scope: {host_har} named by the browser, "
+            f"{host_wire} seen in a TLS handshake, {host_zta} named in the agent's log."
+        ),
+        "limit": (
+            "Names a destination, not a connection. A host opened over twelve "
+            "connections gives one hostname, so this cannot say which of them failed."
+        ),
+    })
+
+    ports = {f.src_port for f in flows if f.app is not None}
+    both = sum(1 for f in flows if f.app is not None and f.wire is not None)
+    keys.append({
+        "key": "Source port",
+        "carried_by": "ZTA log and the capture (the browser does not record it)",
+        "joined": (
+            f"{len(ports)} port(s) named by the agent, {both} of them matched to a "
+            "captured connection."
+        ),
+        "limit": (
+            "Identifies one connection exactly, but only where both artefacts "
+            "recorded the same connection. Ports are reused, so a match far outside "
+            "the capture window is rejected rather than guessed."
+        ),
+    })
+
+    if "har" in sources:
+        synthetic = sorted({ip for h in scope for ip in h.synthetic_ips})
+        keys.append({
+            "key": "Server address",
+            "carried_by": "HAR serverIPAddress and the capture's peer address",
+            "joined": (
+                f"{len(synthetic)} address(es) the browser recorded never appear on "
+                "the wire, which is itself the evidence that the agent answered the "
+                "lookup and intercepted the connection locally."
+                if synthetic
+                else "No address the browser recorded is missing from the wire."
+            ),
+            "limit": (
+                "Cannot be used as a join for steered traffic: the address the browser "
+                "was given is synthetic and belongs to the agent, not the server."
+            ),
+        })
+
+    return keys
 
 
 def focus_report(session: SessionCorrelation, focus: str) -> dict | None:
@@ -1564,7 +1707,7 @@ def focus_report(session: SessionCorrelation, focus: str) -> dict | None:
         "sides": sides,
         "scope_hosts": sorted(scope_names),
         "breakdown": breakdown,
-        "trace": _connection_trace(flows, scope, session.sources),
+        "trace": _connection_trace(flows, scope, session.sources, session),
         "host_count": len(scope),
         "flow_count": len(flows),
         "named_host_count": len(named),

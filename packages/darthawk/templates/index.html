@@ -40,7 +40,7 @@
                     <div>
                         <input type="radio" name="module" id="mod-vpn" value="VPN" class="hidden radio-custom">
                         <label for="mod-vpn" class="dh-nav-item block text-left border border-slate-500 text-slate-300 rounded-lg px-4 py-3 cursor-pointer transition-all hover:bg-white/5 font-bold tracking-wide">
-                            VPN
+                            RA VPN
                         </label>
                     </div>
                     <div>
@@ -84,6 +84,14 @@
             </header>
             <main class="dh-content space-y-6">
         <div id="viewAnalyze" class="dh-view space-y-6">
+        <div id="moduleDevNotice" class="hidden dh-devnotice">
+            <div class="dh-devnotice-title"><span id="moduleDevNoticeName">This module</span> is still in development</div>
+            <p class="dh-devnotice-body">
+                There is no analysis behind this module yet, so uploading a DART bundle here would
+                return nothing useful. Bundle upload is disabled until the checks are implemented.
+            </p>
+            <p class="dh-devnotice-body">Use <strong>ZTA</strong>, <strong>UZTNA</strong> or <strong>RA VPN</strong>, which do analyse a bundle.</p>
+        </div>
         <form id="uploadForm" class="space-y-6">
             
             <!-- File Input -->
@@ -511,6 +519,19 @@
                 <div id="uztnaSummaryVerdict"></div>
                 <div id="uztnaSummaryCards" class="mt-4 flex flex-col"></div>
                 <div id="uztnaSummaryLadders" class="mt-4"></div>
+            </div>
+            <div id="vpnSummaryWrap" class="hidden mb-4 rounded-lg border border-sky-500/35 bg-black/35 p-4">
+                <div class="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <h4 class="text-sky-300 font-bold tracking-wide text-sm uppercase">RA VPN - Certificate Authentication</h4>
+                        <p id="vpnSummarySub" class="text-xs text-slate-400"></p>
+                    </div>
+                    <div id="vpnSummaryHeadline" class="text-base text-sky-100/90 md:text-right"></div>
+                </div>
+                <div id="vpnSummaryVerdict"></div>
+                <div id="vpnSummaryCards" class="mt-4 flex flex-col"></div>
+                <div id="vpnSummaryAttempts" class="mt-4"></div>
+                <div id="vpnSummaryCertificates" class="mt-4"></div>
             </div>
             <div id="resultOutputPanel" class="bg-black/50 border border-sky-500/40 rounded-lg p-5">
                 <div class="result-header-actions mb-3 justify-end flex-wrap">

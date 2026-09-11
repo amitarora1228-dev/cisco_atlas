@@ -18,6 +18,7 @@ import mimetypes
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from xml.etree import ElementTree
 from threading import Timer
 from zoneinfo import ZoneInfo
 from email.message import EmailMessage
@@ -2307,6 +2308,96 @@ def is_zta_trace_level_logging_enabled(root_dir):
     return False
 
 
+def _vpn_xml_text(node, tag):
+    for child in node.iter():
+        if child.tag.split("}")[-1].lower() == tag.lower():
+            return (child.text or "").strip()
+    return ""
+
+
+def build_vpn_preview_signals(root_dir):
+    """Profiles, headends and preferences that decide how RA VPN authenticates."""
+    signals = {"available": False, "profiles": [], "preferences": {}}
+
+    profile_dirs = []
+    for current_root, _, _ in os.walk(root_dir):
+        normalized = current_root.lower().replace("_", " ")
+        if "__macosx" in current_root.lower():
+            continue
+        if "anyconnect vpn" in normalized and normalized.rstrip(os.sep).endswith("profiles"):
+            profile_dirs.append(current_root)
+
+    for profile_dir in profile_dirs:
+        for filename in sorted(os.listdir(profile_dir)):
+            if not filename.lower().endswith(".xml") or filename.startswith("._"):
+                continue
+            path = os.path.join(profile_dir, filename)
+            try:
+                tree = ElementTree.parse(path)
+            except (ElementTree.ParseError, OSError):
+                continue
+
+            root = tree.getroot()
+            host_entries = [
+                node for node in root.iter()
+                if node.tag.split("}")[-1] == "HostEntry"
+            ]
+            has_cert_match = any(
+                node.tag.split("}")[-1] == "CertificateMatch" for node in root.iter()
+            )
+            auto_select = _vpn_xml_text(root, "AutomaticCertSelection")
+
+            hosts = []
+            for entry in host_entries:
+                hosts.append({
+                    "name": _vpn_xml_text(entry, "HostName"),
+                    "address": _vpn_xml_text(entry, "HostAddress"),
+                    "user_group": _vpn_xml_text(entry, "UserGroup"),
+                })
+
+            signals["profiles"].append({
+                "file": filename,
+                "hosts": hosts,
+                "certificate_match": has_cert_match,
+                "automatic_cert_selection": auto_select or "not set",
+            })
+
+    preference_files = []
+    for current_root, _, files in os.walk(root_dir):
+        normalized = current_root.lower().replace("_", " ")
+        if "__macosx" in current_root.lower():
+            continue
+        if "anyconnect vpn" not in normalized or "preferences" not in normalized:
+            continue
+        for filename in files:
+            if filename.startswith("._") or not filename.lower().startswith("preferences"):
+                continue
+            preference_files.append(os.path.join(current_root, filename))
+
+    # preferences_global.xml holds machine defaults; the user-scoped file is the
+    # one carrying the last profile and the pinned certificate thumbprint.
+    preference_files.sort(key=lambda path: "global" in os.path.basename(path).lower())
+
+    for path in preference_files:
+        try:
+            root = ElementTree.parse(path).getroot()
+        except (ElementTree.ParseError, OSError):
+            continue
+        signals["preferences"] = {
+            "file": os.path.basename(path),
+            "default_host": _vpn_xml_text(root, "DefaultHostName"),
+            "default_user": _vpn_xml_text(root, "DefaultUser"),
+            "client_certificate_thumbprint": _vpn_xml_text(root, "ClientCertificateThumbprint"),
+            "multiple_client_certificate_thumbprints": _vpn_xml_text(
+                root, "MultipleClientCertificateThumbprints"
+            ),
+        }
+        break
+
+    signals["available"] = bool(signals["profiles"] or signals["preferences"])
+    return signals
+
+
 def extract_bundle_preview_metadata(root_dir, include_log_windows=True, include_component_versions=True):
     bundle_timezone, bundle_timezone_name = resolve_bundle_timezone(root_dir)
     if include_component_versions:
@@ -2349,12 +2440,14 @@ def extract_bundle_preview_metadata(root_dir, include_log_windows=True, include_
             bundle_timezone_name,
         )
         zta_preview_signals = build_zta_preview_signals(root_dir)
+        vpn_preview_signals = build_vpn_preview_signals(root_dir)
     else:
         zta_logs["skipped"] = True
         duo_logs["skipped"] = True
         vpn_logs["skipped"] = True
         umbrella_logs["skipped"] = True
         zta_preview_signals = {"available": False, "skipped": True}
+        vpn_preview_signals = {"available": False, "skipped": True}
 
     return {
         "cisco_secure_client_version": cisco_secure_client_version,
@@ -2370,6 +2463,7 @@ def extract_bundle_preview_metadata(root_dir, include_log_windows=True, include_
         "vpn_logs": vpn_logs,
         "umbrella_logs": umbrella_logs,
         "zta_preview_signals": zta_preview_signals,
+        "vpn_preview_signals": vpn_preview_signals,
     }
 
 
@@ -2408,6 +2502,7 @@ def inspect_bundle_for_org_ids(file_storage, prefix="darthawk_inspect_", include
             "vpn_logs": preview_metadata["vpn_logs"],
             "umbrella_logs": preview_metadata["umbrella_logs"],
             "zta_preview_signals": preview_metadata.get("zta_preview_signals"),
+            "vpn_preview_signals": preview_metadata.get("vpn_preview_signals"),
             "lightweight_inspect": not include_log_windows,
         }
     finally:
@@ -4517,6 +4612,735 @@ _UZTNA_RE_TND_INACTIVE = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# RA VPN - Cisco Secure Client AnyConnect VPN log reader
+#
+# The same agent writes two completely different files depending on platform, so
+# both are normalised into one record shape before any detection runs:
+#
+#   Windows  "Cisco Secure Client/AnyConnect VPN/Logs/AnyConnectVPN.txt"
+#            multi-line blocks separated by a row of asterisks, with
+#            "Date :", "Time :", "Type :", "Source :" headers.
+#   macOS    "Cisco Secure Client/AnyConnect VPN/Logs/AnyConnectVPN.log"
+#            a `log show` dump: one record per line, ISO timestamp first.
+# ---------------------------------------------------------------------------
+
+_VPN_RECORD_SEPARATOR_RE = re.compile(r"^\*{10,}\s*$")
+_VPN_WIN_HEADER_RE = re.compile(r"^(Date|Time|Type|Source|Description)\s*:\s*(.*)$")
+_VPN_MAC_RECORD_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d+[+-]\d{4}\s+"
+    r"0x[0-9a-f]+\s+(?P<level>\S+)\s+\S+\s+(?P<pid>\d+)\s+\d+\s+"
+    r"(?P<process>[^:]+):\s*(?P<body>.*)$"
+)
+_VPN_CATEGORY_RE = re.compile(r"\[com\.cisco\.secureclient\.vpn:(?P<source>[^\]]+)\]")
+_VPN_FUNCTION_RE = re.compile(r"Function:\s*(?P<function>\S+)")
+_VPN_FILE_LINE_RE = re.compile(r"File:\s*(?P<file>\S+)\s+Line:\s*(?P<line>\d+)\s*")
+_VPN_TID_PID_RE = re.compile(r"\[TID=\d+(?:\s+PID=\d+)?\]\s*")
+
+_VPN_LEVELS = {
+    "information": "info",
+    "informational": "info",
+    "default": "info",
+    "debug": "info",
+    "info": "info",
+    "warning": "warning",
+    "warn": "warning",
+    "error": "error",
+    "fault": "error",
+    "critical": "error",
+}
+
+
+def _vpn_normalize_level(raw_level):
+    return _VPN_LEVELS.get(str(raw_level or "").strip().lower(), "info")
+
+
+def find_vpn_log_files(root_dir):
+    """The AnyConnect VPN agent logs only.
+
+    The same folder also holds `acsock.log`, which belongs to the socket-filter
+    subsystem (`com.cisco.anyconnect.acsock`) and carries ZTA traffic too, so it
+    is excluded here rather than mixed into the VPN record stream.
+    """
+    return [
+        path
+        for path in find_module_log_text_files(root_dir, "AnyConnect VPN")
+        if os.path.basename(path).lower().startswith("anyconnectvpn")
+    ]
+
+
+def _vpn_parse_windows_block(block, source_path, start_line):
+    """One asterisk-delimited Windows block -> a record, or None if not one."""
+    fields = {}
+    body_lines = []
+    in_body = False
+
+    for line in block.splitlines():
+        if not in_body:
+            header = _VPN_WIN_HEADER_RE.match(line)
+            if header:
+                key, value = header.group(1).lower(), header.group(2).strip()
+                if key == "description":
+                    in_body = True
+                    if value:
+                        body_lines.append(value)
+                else:
+                    fields[key] = value
+                continue
+            if not line.strip():
+                continue
+        body_lines.append(line)
+
+    if "date" not in fields and "time" not in fields:
+        return None
+
+    body = "\n".join(body_lines).strip()
+    body = _VPN_TID_PID_RE.sub("", body).strip()
+
+    function = ""
+    file_name = ""
+    line_number = None
+    message_lines = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Function:"):
+            function = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("File:"):
+            file_name = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("Line:"):
+            digits = stripped.split(":", 1)[1].strip()
+            line_number = int(digits) if digits.isdigit() else None
+        else:
+            message_lines.append(stripped)
+
+    timestamp = "{} {}".format(fields.get("date", ""), fields.get("time", "")).strip()
+    return {
+        "timestamp": timestamp,
+        "level": _vpn_normalize_level(fields.get("type")),
+        "level_text": fields.get("type", ""),
+        "source": fields.get("source", ""),
+        "process": fields.get("source", ""),
+        "function": function,
+        "file": file_name,
+        "file_line": line_number,
+        "message": " ".join(part for part in message_lines if part).strip(),
+        "path": source_path,
+        "log_line": start_line,
+    }
+
+
+def _vpn_parse_mac_line(line, source_path, line_number):
+    match = _VPN_MAC_RECORD_RE.match(line)
+    if not match:
+        return None
+
+    body = match.group("body")
+    category = _VPN_CATEGORY_RE.search(body)
+    source = category.group("source") if category else ""
+    if category:
+        body = body[category.end():]
+
+    body = _VPN_TID_PID_RE.sub("", body).strip()
+
+    function_match = _VPN_FUNCTION_RE.search(body)
+    function = function_match.group("function") if function_match else ""
+    if function_match:
+        body = body[:function_match.start()] + body[function_match.end():]
+
+    file_line_match = _VPN_FILE_LINE_RE.search(body)
+    file_name = ""
+    file_line = None
+    if file_line_match:
+        file_name = file_line_match.group("file")
+        file_line = int(file_line_match.group("line"))
+        body = body[:file_line_match.start()] + body[file_line_match.end():]
+
+    return {
+        "timestamp": match.group("ts"),
+        "level": _vpn_normalize_level(match.group("level")),
+        "level_text": match.group("level"),
+        "source": source,
+        "process": match.group("process").strip(),
+        "function": function,
+        "file": file_name,
+        "file_line": file_line,
+        "message": body.strip(),
+        "path": source_path,
+        "log_line": line_number,
+    }
+
+
+def parse_vpn_log_file(path, display_path=None):
+    """Read one AnyConnect VPN log into normalised records.
+
+    Format is decided per file by what actually parses, not by extension: a
+    Windows-style .log and a macOS-style .txt both occur in real bundles.
+    """
+    label = display_path or os.path.basename(path)
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            text = handle.read()
+    except OSError:
+        return []
+
+    records = []
+    for index, line in enumerate(text.splitlines(), start=1):
+        record = _vpn_parse_mac_line(line, label, index)
+        if record:
+            records.append(record)
+    if records:
+        return records
+
+    block_lines = []
+    block_start = 1
+    for index, line in enumerate(text.splitlines(), start=1):
+        if _VPN_RECORD_SEPARATOR_RE.match(line):
+            record = _vpn_parse_windows_block("\n".join(block_lines), label, block_start)
+            if record:
+                records.append(record)
+            block_lines = []
+            block_start = index + 1
+            continue
+        block_lines.append(line)
+
+    trailing = _vpn_parse_windows_block("\n".join(block_lines), label, block_start)
+    if trailing:
+        records.append(trailing)
+
+    return records
+
+
+def collect_vpn_log_records(root_dir):
+    """Every AnyConnect VPN record in the bundle, in file order."""
+    records = []
+    for path in find_vpn_log_files(root_dir):
+        display_path = os.path.relpath(path, root_dir)
+        records.extend(parse_vpn_log_file(path, display_path))
+    return records
+
+
+# ---------------------------------------------------------------------------
+# RA VPN - certificate authentication
+#
+# Message text is identical across platforms; the process that emits it is not
+# (`csc_vpnapi` on Windows, `csc_vpnapishim` on macOS), so every rule below
+# keys on function and message and never on source.
+# ---------------------------------------------------------------------------
+
+_VPN_RE_CONNECT_REQUESTED = re.compile(
+    r"An SSL VPN connection to (?P<target>.+?) has been requested by the user\."
+)
+_VPN_RE_SERVER_CERT_OK = re.compile(r"Return success from VerifyServerCertificate")
+_VPN_RE_CLIENT_CERT_REQUESTED = re.compile(
+    r"Client certificate requested by peer(?P<agg>\s*\(via AggAuth\))?"
+)
+_VPN_RE_USING_CLIENT_CERT = re.compile(r"Using client cert:\s*(?P<subject>\S.*?)\s*$")
+_VPN_RE_ISSUER_NOT_FOUND = re.compile(
+    r"Issuer not found in CA Names from server for cert:\s*(?P<subject>\S.*?)\s*$"
+)
+_VPN_RE_NEXT_CLIENT_CERT = re.compile(
+    r"Subject Name:\s*(?P<subject>.+?)\s+Issuer Name\s*:\s*(?P<issuer>.+?)\s+Store\s*:\s*(?P<store>.+?)\s*$"
+)
+_VPN_RE_NO_VALID_CERTS = re.compile(
+    r"Certificate authentication requested from gateway, no valid certs found in users cert store"
+)
+_VPN_RE_NO_CERTS_AVAILABLE = re.compile(r"No valid certificates available for authentication")
+_VPN_RE_GATEWAY_ERROR = re.compile(
+    r"The following error message was received from the secure gateway:\s*(?P<error>.+?)\s*$"
+)
+_VPN_RE_MCA = re.compile(r"\[MCA\]\s*(?P<detail>.+?)\s*$")
+_VPN_RE_TUNNEL_ESTABLISHING = re.compile(r"Establishing VPN session")
+_VPN_RE_ATTEMPT_FAILED = re.compile(r"Connection attempt has failed")
+_VPN_RE_NO_CLIENT_CERT = re.compile(r"^No client certificate\.?$")
+
+# The management tunnel authenticates itself with its own certificate. Folding
+# its events into the user's attempt makes the ladder describe two tunnels.
+_VPN_MGMT_TUNNEL_TOKENS = ("mgmttun", "vpnmgmttun")
+
+_VPN_CERT_FUNCTIONS = (
+    "ClientCertRequestCB",
+    "nextClientCert",
+    "processResponseStringFromSG",
+    "certAuthHasFailed",
+    "processIfcData",
+)
+
+
+def _vpn_is_management_tunnel(record):
+    haystack = "{} {}".format(record.get("source", ""), record.get("process", "")).lower()
+    return any(token in haystack for token in _VPN_MGMT_TUNNEL_TOKENS)
+
+
+def _vpn_cert_common_name(subject):
+    """CN from either DN spelling: `/C=BE/CN=x` and `C=BE, CN=x` both occur."""
+    match = re.search(r"CN=([^/,]+)", str(subject or ""))
+    return match.group(1).strip() if match else str(subject or "").strip()
+
+
+def _vpn_new_attempt(index):
+    return {
+        "index": index,
+        "started": "",
+        "ended": "",
+        "target": "",
+        "auth_mode": "",
+        "outcome": "incomplete",
+        "failure_reason": "",
+        "gateway_errors": [],
+        "certs_offered": [],
+        "certs_rejected": [],
+        "mca_events": [],
+        "events": [],
+    }
+
+
+def _vpn_note_event(attempt, record, stage, detail):
+    if not attempt["started"]:
+        attempt["started"] = record.get("timestamp", "")
+    attempt["ended"] = record.get("timestamp", "")
+    attempt["events"].append({
+        "stage": stage,
+        "detail": detail,
+        "timestamp": record.get("timestamp", ""),
+        "function": record.get("function", ""),
+        "path": record.get("path", ""),
+        "log_line": record.get("log_line"),
+    })
+
+
+def analyze_vpn_cert_auth(records):
+    """Split the record stream into certificate-authentication attempts.
+
+    An attempt runs until a terminal event - the gateway rejecting the
+    certificate, the client giving up, or the tunnel starting. Segmenting on
+    the user's connect request instead would merge attempts, because automatic
+    reconnects never emit one.
+    """
+    attempts = []
+    certificates = {}
+    current = None
+    mgmt_tunnel_events = 0
+
+    def ensure_attempt():
+        nonlocal current
+        if current is None:
+            current = _vpn_new_attempt(len(attempts) + 1)
+        return current
+
+    def close_attempt(outcome):
+        nonlocal current
+        if current is None:
+            return
+        current["outcome"] = outcome
+        attempts.append(current)
+        current = None
+
+    def touch_certificate(subject, **updates):
+        common_name = _vpn_cert_common_name(subject)
+        if not common_name:
+            return None
+        entry = certificates.setdefault(common_name, {
+            "common_name": common_name,
+            "subject": subject,
+            "issuer": "",
+            "stores": [],
+            "offered": 0,
+            "rejected": 0,
+        })
+        if len(str(subject or "")) > len(str(entry["subject"])):
+            entry["subject"] = subject
+        for key, value in updates.items():
+            if key == "store":
+                if value and value not in entry["stores"]:
+                    entry["stores"].append(value)
+            elif key in ("offered", "rejected"):
+                entry[key] += value
+            elif value:
+                entry[key] = value
+        return entry
+
+    for record in records:
+        message = record.get("message", "")
+        function = record.get("function", "")
+        if not message:
+            continue
+
+        if _vpn_is_management_tunnel(record):
+            if function in _VPN_CERT_FUNCTIONS:
+                mgmt_tunnel_events += 1
+            continue
+
+        requested = _VPN_RE_CONNECT_REQUESTED.search(message)
+        if requested:
+            attempt = ensure_attempt()
+            attempt["target"] = requested.group("target").strip()
+            _vpn_note_event(attempt, record, "requested", attempt["target"])
+            continue
+
+        if _VPN_RE_SERVER_CERT_OK.search(message):
+            if current is not None:
+                _vpn_note_event(current, record, "server_cert", "Server certificate verified")
+            continue
+
+        client_cert_requested = _VPN_RE_CLIENT_CERT_REQUESTED.search(message)
+        if client_cert_requested:
+            attempt = ensure_attempt()
+            via_agg = bool(client_cert_requested.group("agg"))
+            _vpn_note_event(
+                attempt,
+                record,
+                "cert_requested",
+                "Client certificate requested by peer" + (" (via AggAuth)" if via_agg else ""),
+            )
+            continue
+
+        using_cert = _VPN_RE_USING_CLIENT_CERT.search(message)
+        if using_cert:
+            subject = using_cert.group("subject")
+            attempt = ensure_attempt()
+            if subject not in attempt["certs_offered"]:
+                attempt["certs_offered"].append(subject)
+            touch_certificate(subject, offered=1)
+            _vpn_note_event(attempt, record, "cert_selected", subject)
+            continue
+
+        issuer_missing = _VPN_RE_ISSUER_NOT_FOUND.search(message)
+        if issuer_missing:
+            subject = issuer_missing.group("subject")
+            attempt = ensure_attempt()
+            if subject not in attempt["certs_rejected"]:
+                attempt["certs_rejected"].append(subject)
+            touch_certificate(subject, rejected=1)
+            _vpn_note_event(attempt, record, "issuer_rejected", subject)
+            continue
+
+        enumerated = _VPN_RE_NEXT_CLIENT_CERT.search(message)
+        if enumerated and function.endswith("nextClientCert"):
+            touch_certificate(
+                enumerated.group("subject"),
+                issuer=enumerated.group("issuer").strip(),
+                store=enumerated.group("store").strip(),
+            )
+            continue
+
+        mca = _VPN_RE_MCA.search(message)
+        if mca:
+            attempt = ensure_attempt()
+            attempt["auth_mode"] = "Multiple certificate (MCA)"
+            detail = mca.group("detail")
+            attempt["mca_events"].append(detail)
+            _vpn_note_event(attempt, record, "mca", detail)
+            continue
+
+        if _VPN_RE_NO_VALID_CERTS.search(message) or _VPN_RE_NO_CERTS_AVAILABLE.search(message):
+            attempt = ensure_attempt()
+            attempt["failure_reason"] = (
+                "No certificate in the endpoint's store was issued by a CA the gateway advertised"
+            )
+            _vpn_note_event(attempt, record, "cert_auth_failed", message)
+            continue
+
+        gateway_error = _VPN_RE_GATEWAY_ERROR.search(message)
+        if gateway_error:
+            attempt = ensure_attempt()
+            error = gateway_error.group("error").strip()
+            if error not in attempt["gateway_errors"]:
+                attempt["gateway_errors"].append(error)
+            _vpn_note_event(attempt, record, "gateway_error", error)
+            close_attempt("failed")
+            continue
+
+        if _VPN_RE_TUNNEL_ESTABLISHING.search(message):
+            attempt = ensure_attempt()
+            _vpn_note_event(attempt, record, "tunnel", "Establishing VPN session")
+            close_attempt("connected")
+            continue
+
+        if _VPN_RE_ATTEMPT_FAILED.search(message):
+            attempt = ensure_attempt()
+            _vpn_note_event(attempt, record, "attempt_failed", "Connection attempt has failed")
+            close_attempt("failed")
+            continue
+
+    close_attempt("incomplete")
+
+    for attempt in attempts:
+        if not attempt["auth_mode"]:
+            attempt["auth_mode"] = "Single certificate" if attempt["certs_offered"] else "Unknown"
+
+    return {
+        "attempts": attempts,
+        "certificates": sorted(certificates.values(), key=lambda c: -c["offered"]),
+        "management_tunnel_events": mgmt_tunnel_events,
+    }
+
+
+def _vpn_group_issuers(certificates):
+    """Issuers the gateway trusted vs rejected, judged only by observed outcomes."""
+    issuers = {}
+    for cert in certificates:
+        issuer = cert.get("issuer") or "Unknown issuer"
+        entry = issuers.setdefault(issuer, {
+            "issuer": issuer,
+            "certificates": [],
+            "offered": 0,
+            "rejected": 0,
+        })
+        entry["certificates"].append(cert["common_name"])
+        entry["offered"] += cert.get("offered", 0)
+        entry["rejected"] += cert.get("rejected", 0)
+
+    for entry in issuers.values():
+        if entry["rejected"] and entry["rejected"] >= entry["offered"]:
+            entry["trust"] = "rejected"
+        elif entry["rejected"]:
+            entry["trust"] = "partial"
+        elif entry["offered"]:
+            entry["trust"] = "accepted"
+        else:
+            entry["trust"] = "unused"
+
+    order = {"rejected": 0, "partial": 1, "accepted": 2, "unused": 3}
+    return sorted(issuers.values(), key=lambda e: (order[e["trust"]], -e["offered"]))
+
+
+_VPN_CERT_DOC_SINGLE = (
+    "https://techzone.cisco.com/t5/Remote-Access-ZTNA-RAVPN/"
+    "How-to-configure-certificate-based-authentication-for-AnyConnect/ta-p/9961572"
+)
+_VPN_CERT_DOC_MULTIPLE = (
+    "https://techzone.cisco.com/t5/Remote-Access-ZTNA-RAVPN/"
+    "How-to-configure-Multiple-certificate-based-authentication-for/ta-p/10003228"
+)
+
+
+def _vpn_build_cert_cards(attempts, certificates, issuers):
+    """Interpreted cards. Each one states only what the records support."""
+    cards = []
+    failed = [a for a in attempts if a["outcome"] == "failed"]
+    connected = [a for a in attempts if a["outcome"] == "connected"]
+    cert_failures = [a for a in failed if a["failure_reason"] or a["certs_rejected"]]
+    rejected_issuers = [i for i in issuers if i["trust"] == "rejected"]
+    accepted_issuers = [i for i in issuers if i["trust"] == "accepted"]
+
+    if cert_failures:
+        gateway_errors = []
+        for attempt in cert_failures:
+            for error in attempt["gateway_errors"]:
+                if error not in gateway_errors:
+                    gateway_errors.append(error)
+
+        suggestions = [
+            "Upload the CA that issued the client certificate to the VPN profile: "
+            "Secure Access dashboard > Connect > End User Connectivity > Virtual Private "
+            "Network > your profile > Authentication > Upload CA certificate. Already "
+            "uploaded CAs are listed under Secure > Certificates > VPN Certificate Authority.",
+            "Confirm the certificate's CN matches a user synced to the dashboard under "
+            "Connect > Users and Groups > Users. A certificate signed by a trusted CA still "
+            "fails authorisation when its CN resolves to no known user.",
+            "Check that the profile's 'Primary field to authenticate' and 'Secondary field "
+            "to authenticate' name fields the certificate actually carries.",
+            "Single certificate setup: {}".format(_VPN_CERT_DOC_SINGLE),
+        ]
+        if any(a["auth_mode"].startswith("Multiple") for a in cert_failures):
+            suggestions.append(
+                "Multiple certificate setup: {}".format(_VPN_CERT_DOC_MULTIPLE)
+            )
+
+        cards.append({
+            "label": "Certificate authentication",
+            "severity": "critical" if not connected else "warning",
+            "chip": "{} failed attempt{}".format(len(cert_failures), "" if len(cert_failures) == 1 else "s"),
+            "metric": " / ".join(gateway_errors) if gateway_errors else "",
+            "summary": (
+                "The gateway rejected certificate authentication on {} attempt{}."
+                .format(len(cert_failures), "" if len(cert_failures) == 1 else "s")
+            ),
+            "meaning": (
+                "The client offered certificates from the endpoint's stores and the gateway "
+                "accepted none of them. The client then reported that no valid certificate "
+                "was available, and the gateway returned a validation failure."
+            ),
+            "impact": (
+                "The VPN cannot be established by certificate. The user sees "
+                "\"Certificate Validation Failure\" or \"No valid certificates available "
+                "for authentication\"."
+            ),
+            "groups": [{"label": error, "count": 1} for error in gateway_errors],
+            "suggestions": suggestions,
+        })
+
+    if rejected_issuers:
+        cards.append({
+            "label": "Certificate trust",
+            "severity": "critical" if cert_failures and not connected else "warning",
+            "chip": "{} issuer{} not trusted".format(
+                len(rejected_issuers), "" if len(rejected_issuers) == 1 else "s"
+            ),
+            "metric": "{} of {} issuers accepted".format(len(accepted_issuers), len(issuers)),
+            "summary": (
+                "Certificates from {} issuer{} were refused because the gateway did not "
+                "advertise th{}.".format(
+                    len(rejected_issuers),
+                    "" if len(rejected_issuers) == 1 else "s",
+                    "at CA" if len(rejected_issuers) == 1 else "ose CAs",
+                )
+            ),
+            "meaning": (
+                "During the TLS handshake the gateway sends the list of CAs it will accept. "
+                "The client logged \"Issuer not found in CA Names from server\" for every "
+                "certificate below, which means the issuing CA is not uploaded to the VPN "
+                "profile - not that the certificate itself is invalid."
+            ),
+            "impact": (
+                "These certificates can never authenticate against this profile, whatever "
+                "the user selects."
+            ),
+            "groups": [
+                {"label": "{} - {}".format(entry["issuer"], ", ".join(entry["certificates"])),
+                 "count": entry["rejected"]}
+                for entry in rejected_issuers
+            ],
+            "suggestions": [
+                "If one of these issuers is the intended CA, upload its root or intermediate "
+                "certificate to the VPN profile.",
+                "If it is not, narrow certificate selection so the client stops offering it - "
+                "device-management and eID certificates are commonly picked up by accident.",
+            ],
+        })
+
+    if accepted_issuers:
+        names = []
+        for entry in accepted_issuers:
+            names.extend(entry["certificates"])
+        cards.append({
+            "label": "Certificates the gateway did accept",
+            "severity": "info",
+            "chip": "{} certificate{}".format(len(names), "" if len(names) == 1 else "s"),
+            "metric": ", ".join(entry["issuer"] for entry in accepted_issuers),
+            "summary": (
+                "{} certificate{} from {} issuer{} were offered and never refused."
+                .format(
+                    len(names), "" if len(names) == 1 else "s",
+                    len(accepted_issuers), "" if len(accepted_issuers) == 1 else "s",
+                )
+            ),
+            "meaning": (
+                "The gateway advertised these CAs, so a certificate from them is the one the "
+                "profile expects. Absence of a rejection is not proof of authorisation - the "
+                "CN must still resolve to a synced user."
+            ),
+            "impact": "",
+            "groups": [{"label": name, "count": 1} for name in names],
+            "suggestions": [],
+        })
+
+    offered_per_attempt = [len(a["certs_offered"]) for a in attempts if a["certs_offered"]]
+    if offered_per_attempt and max(offered_per_attempt) > 2:
+        worst = max(offered_per_attempt)
+        cards.append({
+            "label": "Certificate selection",
+            "severity": "warning",
+            "chip": "{} certificates tried".format(worst),
+            "metric": "{} certificates in the endpoint's stores".format(len(certificates)),
+            "summary": (
+                "One attempt offered {} different certificates before giving up.".format(worst)
+            ),
+            "meaning": (
+                "Multiple certificate authentication ignores the profile's 'Enable automatic "
+                "Certificate Selection' preference, so the client tries combinations until one "
+                "works or all fail. A crowded certificate store turns that into a long wait."
+            ),
+            "impact": "Connection attempts take noticeably longer and may appear to hang.",
+            "groups": [
+                {"label": cert["common_name"], "count": cert["offered"]}
+                for cert in certificates if cert["offered"]
+            ],
+            "suggestions": [
+                "Add a certificate matching rule to the AnyConnect XML profile so only the "
+                "intended certificate is considered.",
+                "Multiple certificate authentication accepts exactly two certificates. On "
+                "Windows that is one machine and one user certificate; two certificates from "
+                "the machine store is not supported.",
+            ],
+        })
+
+    return cards
+
+
+def build_vpn_summary_payload(root_dir):
+    """RA VPN certificate-authentication summary for one DART bundle."""
+    log_files = find_vpn_log_files(root_dir)
+    if not log_files:
+        return {
+            "available": False,
+            "reason": "This bundle carries no Cisco Secure Client AnyConnect VPN logs.",
+        }
+
+    records = collect_vpn_log_records(root_dir)
+    if not records:
+        return {
+            "available": False,
+            "reason": "The AnyConnect VPN log was found but no records could be read from it.",
+        }
+
+    analysis = analyze_vpn_cert_auth(records)
+    attempts = analysis["attempts"]
+    certificates = analysis["certificates"]
+    issuers = _vpn_group_issuers(certificates)
+
+    cert_attempts = [
+        attempt for attempt in attempts
+        if attempt["certs_offered"] or attempt["certs_rejected"] or attempt["gateway_errors"]
+    ]
+    if not cert_attempts:
+        return {
+            "available": True,
+            "reason": (
+                "No certificate authentication was attempted in this bundle's VPN logs. "
+                "{} records were read.".format(len(records))
+            ),
+            "attempts": [],
+            "certificates": certificates,
+            "issuers": issuers,
+            "cards": [],
+            "verdict": {"level": "healthy", "summary": "Nothing to report for certificate authentication."},
+            "headline": "No certificate authentication found",
+            "sub": "{} VPN records across {} log file(s)".format(len(records), len(log_files)),
+        }
+
+    failed = [a for a in cert_attempts if a["outcome"] == "failed"]
+    connected = [a for a in attempts if a["outcome"] == "connected"]
+
+    if failed and not connected:
+        level = "problem"
+        summary = "Certificate authentication failed on every attempt in this bundle."
+    elif failed:
+        level = "degraded"
+        summary = (
+            "Certificate authentication failed on {} of {} attempts; {} connected."
+            .format(len(failed), len(cert_attempts), len(connected))
+        )
+    else:
+        level = "healthy"
+        summary = "Certificate authentication completed without a rejection."
+
+    return {
+        "available": True,
+        "reason": "",
+        "attempts": cert_attempts,
+        "certificates": certificates,
+        "issuers": issuers,
+        "cards": _vpn_build_cert_cards(cert_attempts, certificates, issuers),
+        "verdict": {"level": level, "summary": summary},
+        "headline": "{} certificate attempt{}, {} failed".format(
+            len(cert_attempts), "" if len(cert_attempts) == 1 else "s", len(failed)
+        ),
+        "sub": "{} VPN records across {} log file(s)".format(len(records), len(log_files)),
+        "management_tunnel_events": analysis["management_tunnel_events"],
+    }
+
+
 def _uztna_classify_enforcement(episode):
     """Local vs cloud is decided by the headend of the stack the client migrates to."""
     headend = episode.get("new_headend") or episode.get("redirect_to") or ""
@@ -5099,9 +5923,12 @@ def build_uztna_summary_payload(root_dir, flow_filter=""):
         name_mismatch = any(code == "NAME_MISMATCH" for code in error_codes)
         cn_matches_requested = bool(leaf and sample.get("tls_server") and leaf.endswith(sample["tls_server"]))
         meaning = (
-            "The client rejected the enforcement point's certificate. The requested name and the certificate "
-            "subject shown in the log are the same, so a plain hostname typo is not the cause."
+            "NAME_MISMATCH means the certificate's CN does not match the value the client passed. "
+            "The requested name and the certificate subject shown in the log are the same here, so a "
+            "plain hostname typo is not the cause."
             if name_mismatch and cn_matches_requested
+            else "NAME_MISMATCH means the certificate's CN does not match the value the client passed."
+            if name_mismatch
             else "The client rejected the enforcement point's certificate, so the mTLS tunnel was never established."
         )
         suggestions = [
@@ -5113,6 +5940,13 @@ def build_uztna_summary_payload(root_dir, flow_filter=""):
                 "Windows chain validation requires the requested name in the SAN and ignores CN alone - inspect the certificate directly to confirm."
             )
         suggestions.append("Confirm the issuing CA chain is trusted on the endpoint and that the certificate is issued for the proxy FQDN configured on the FTD.")
+        if name_mismatch:
+            suggestions.extend([
+                "Update the client certificate store: make sure the machine certificate store holds every certificate ZTNA authentication needs.",
+                "Verify NTP synchronisation between the client, the FTD and the supporting infrastructure. A clock skew fails the certificate validity check and surfaces as an authentication failure.",
+                "Universal ZTNA configuration for private resource access: https://www.cisco.com/c/en/us/support/docs/security/secure-access/225858-configure-universal-ztna-for-private.html",
+                "Secure Access onboarding for Universal ZTNA: https://www.cisco.com/c/en/us/support/docs/security/secure-access/225406-configure-secure-access-for-universal.html",
+            ])
 
         assessment.append({
             "label": "Enforcement point certificate",
@@ -5124,6 +5958,7 @@ def build_uztna_summary_payload(root_dir, flow_filter=""):
             "impact": "Without a verified server certificate the client will not send the CONNECT or the access token, so no traffic reaches the resource.",
             "suggestions": suggestions,
             "chain": chain,
+            "requested_name": sample.get("tls_server"),
             "groups": [{"label": code, "count": count} for code, count in error_codes.items()],
         })
 
@@ -7061,8 +7896,34 @@ def analyze():
             tnd_summary_payload = None
             user_pause_summary_payload = None
             uztna_summary_payload = None
+            vpn_summary_payload = None
 
             org_id_results = extract_org_ids_from_enrollments(temp_dir)
+            if selected_module == 'VPN':
+                vpn_summary_payload = build_vpn_summary_payload(temp_dir)
+                mock_report += "\n[RA VPN - certificate authentication]\n"
+                if not vpn_summary_payload.get("available"):
+                    mock_report += "  - {}\n".format(vpn_summary_payload.get("reason", ""))
+                elif not vpn_summary_payload.get("attempts"):
+                    mock_report += "  - {}\n".format(vpn_summary_payload.get("reason", ""))
+                else:
+                    mock_report += "  - {}\n".format(vpn_summary_payload["verdict"]["summary"])
+                    for attempt in vpn_summary_payload["attempts"]:
+                        mock_report += "      * attempt {} [{}] {} - {}\n".format(
+                            attempt["index"],
+                            attempt["started"],
+                            attempt["target"] or "target not logged",
+                            attempt["outcome"],
+                        )
+                        if attempt["failure_reason"]:
+                            mock_report += "          reason: {}\n".format(attempt["failure_reason"])
+                        for error in attempt["gateway_errors"]:
+                            mock_report += "          gateway: {}\n".format(error)
+                    for issuer in vpn_summary_payload["issuers"]:
+                        mock_report += "      * issuer [{}] {} ({} offered, {} refused)\n".format(
+                            issuer["trust"], issuer["issuer"], issuer["offered"], issuer["rejected"]
+                        )
+
             if selected_module == 'UZTNA':
                 uztna_summary_payload = build_uztna_summary_payload(temp_dir, uztna_filter)
                 mock_report += "\n[Universal ZTNA]\n"
@@ -9520,6 +10381,9 @@ def analyze():
 
             if selected_module == 'UZTNA' and uztna_summary_payload:
                 response_data["uztna_summary"] = uztna_summary_payload
+
+            if selected_module == 'VPN' and vpn_summary_payload:
+                response_data["vpn_summary"] = vpn_summary_payload
 
             if selected_module == 'Duo Desktop' and duo_posture_flow_summary_payload:
                 response_data["duo_posture_flow_summary"] = duo_posture_flow_summary_payload
